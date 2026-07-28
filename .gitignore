@@ -1,0 +1,20 @@
+# python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.ruff_cache/
+dist/
+*.egg-info/
+# node
+node_modules/
+frontend/dist/
+# segredos e ambiente — NUNCA commitar
+.env
+.env.*
+!.env.example
+sites.yml
+*.secret
+# artefatos
+data/
+*.log

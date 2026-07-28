@@ -1,0 +1,15 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata: { name: corvo-floatip-scanner }
+spec:
+  schedule: "*/30 * * * *"
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: scanner
+              image: ghcr.io/maxferreira01/citadelp/api:latest
+              command: ["python", "/srv/collectors/corvo_floatip_scanner.py", "--days", "90"]
+              envFrom: [{ secretRef: { name: citadel-env } }]
