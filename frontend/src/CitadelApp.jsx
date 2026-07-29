@@ -1,5 +1,7 @@
 import React, { useMemo, useState } from "react";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell, LabelList } from "recharts";
+import totvsBranco from "./assets/logo-totvs-branco.svg";
+import totvsAzul from "./assets/logo-totvs-azul-escuro.svg";
 
 /* ============================================================================
    CITADEL v0.1 — plataforma completa (protótipo navegável)
@@ -50,6 +52,14 @@ button{font-family:var(--font-ui)}
 button:focus-visible,a:focus-visible{outline:2px solid var(--action);outline-offset:2px}
 a{color:var(--action);text-decoration:none}
 ::-webkit-scrollbar{width:9px;height:9px}::-webkit-scrollbar-thumb{background:var(--hairline);border-radius:6px}
+.shell{display:grid;grid-template-columns:var(--sidebar-w) minmax(0,1fr) var(--rail-w);min-height:100vh;background:var(--bg-page);font-family:var(--font-ui);color:var(--ink)}
+.rail{display:flex}
+.shell.norail{grid-template-columns:var(--sidebar-w) minmax(0,1fr)}
+.shell.norail .rail{display:none}
+.login-grid{display:grid;grid-template-columns:minmax(0,1fr) 500px;min-height:100vh;font-family:var(--font-ui)}
+.tscroll{overflow-x:auto}
+@media (max-width:1440px){.shell{grid-template-columns:var(--sidebar-w) minmax(0,1fr)}.shell .rail{display:none}}
+@media (max-width:1100px){.login-grid{grid-template-columns:minmax(0,1fr)}}
 `;
 
 /* ============================== DADOS ===================================== */
@@ -188,6 +198,72 @@ const SCOLOR = { ok: "var(--state-ok)", warn: "var(--state-warn)", crit: "var(--
 const fmt = (n) => n.toLocaleString("pt-BR");
 const brl = (n) => "R$ " + (n / 1000).toLocaleString("pt-BR", { maximumFractionDigits: 0 }) + " mil";
 
+/* ============================== i18n ====================================== */
+const EN = {
+  // login
+  "Bem-vindo de volta": "Welcome back", "plataforma interna": "internal platform", "nota do dia": "note of the day",
+  "Veja o limite antes de alcançá-lo.": "See the limit before you reach it.",
+  "“O que não é medido é negociado no susto.”": "“What is not measured gets negotiated in a panic.”",
+  "Entrar": "Sign in", "Acesso restrito às equipes de infraestrutura, operações e gestão.": "Access restricted to infrastructure, operations and management teams.",
+  "Continuar com SSO TOTVS": "Continue with TOTVS SSO", "ou": "or", "Usuário corporativo": "Corporate user", "Senha": "Password",
+  "status da plataforma": "platform status", "coletores respondendo": "collectors responding",
+  "varredura Corvo (Slack)": "Raven sweep (Slack)", "sincronização CMDB": "CMDB sync", "uso interno": "internal use",
+  // sidebar
+  "Conselho": "Council", "Três Olhos": "Three Eyes", "Corvo": "Raven", "Vigia": "Watch", "Muralha": "The Wall",
+  "Domínios": "Domains", "Arquivo": "Archive", "Tesouro": "Treasury", "Campanhas": "Campaigns",
+  "visão executiva": "executive view", "capacidade e previsão": "capacity & forecast", "sinais e integrações": "signals & integrations",
+  "Checkmk · downtimes reais": "Checkmk · live downtimes", "limites de plataforma": "platform limits",
+  "datacenters e topologia": "datacenters & topology", "wiki e runbooks": "wiki & runbooks",
+  "orçamento e cotações": "budget & quotes", "planos de ação": "action plans", "Sair": "Sign out",
+  // shell
+  "procedência": "provenance", "ações": "actions", "ocultar painel lateral": "hide side rail", "mostrar painel lateral": "show side rail",
+  // titles
+  "Conselho — visão executiva": "Council — executive view", "síntese para decisão · 27 jul 2026": "decision brief · Jul 27 2026",
+  "Três Olhos — capacidade e previsão": "Three Eyes — capacity & forecast", "trajetórias, runways e limites": "trajectories, runways and limits",
+  "Corvo — sinais": "Raven — signals", "raio-x do canal #alert-float-ip · funcionalidade piloto": "x-ray of #alert-float-ip · pilot feature",
+  "Vigia — Checkmk federado": "Watch — federated Checkmk", "downtimes reais em 5 sites · criar, listar e remover silêncios": "live downtimes across 5 sites · create, list and remove silences",
+  "Muralha — limites de plataforma": "The Wall — platform limits", "uso × alvo operacional × fabricante": "usage × operational target × vendor",
+  "Domínios — datacenters": "Domains — datacenters", "estado por edge": "state per edge",
+  "Arquivo — runbooks": "Archive — runbooks", "fonte de verdade operacional": "operational source of truth",
+  "Tesouro — orçamento e cotações": "Treasury — budget & quotes", "orçado × realizado 2026": "planned × actual 2026",
+  "Campanhas — planos de ação": "Campaigns — action plans", "todo sinal leva a uma ação": "every signal leads to an action",
+  "Meistre — assistente": "Meistre — assistant", "consultas em linguagem natural sobre a plataforma": "natural-language queries about the platform",
+  // vigia
+  "downtimes ativos": "active downtimes", "sites federados": "federated sites", "todos os sites": "all sites",
+  "host + serviço": "host + service", "só host": "host only", "só serviço": "service only", "Atualizar": "Refresh",
+  "silenciados agora": "silenced now", "Nenhum downtime ativo no recorte.": "No active downtime in this view.",
+  "host inteiro": "entire host", "remover": "remove", "novo silêncio": "new silence", "Silenciar": "Silence",
+  "silêncio por RDM (lote)": "RDM silence (batch)", "Aplicar janela": "Apply window",
+  "comentário (obrigatório)": "comment (required)", "serviços (vírgula) — vazio = host inteiro": "services (comma) — empty = entire host",
+  "carregando…": "loading…",
+};
+const LangCtx = React.createContext(["pt", () => {}]);
+const useT = () => {
+  const [lang] = React.useContext(LangCtx);
+  return (s) => (lang === "en" && EN[s]) || s;
+};
+function LangBtn({ style }) {
+  const [lang, setLang] = React.useContext(LangCtx);
+  return (
+    <button onClick={() => setLang(lang === "pt" ? "en" : "pt")} title={lang === "pt" ? "switch to English" : "mudar para português"}
+      style={{ border: "1px solid var(--hairline)", background: "transparent", color: "var(--ink)", borderRadius: 6, padding: "3px 9px", cursor: "pointer", font: "600 11px var(--font-mono)", ...style }}>
+      {lang === "pt" ? "EN" : "PT"}
+    </button>
+  );
+}
+
+/* ============================== logos ===================================== */
+/* Marca CITADEL (glifo próprio) + logo oficial TOTVS (pack de assets da marca). */
+const Logo = ({ size = 26, color = "currentColor" }) => (
+  <svg width={size} height={size} viewBox="0 0 32 32" fill="none" aria-label="CITADEL" role="img">
+    <path d="M4 28V12h4V8h3v4h3V8h4v4h3V8h3v4h4v16h-9v-7a3 3 0 0 0-6 0v7H4Z" fill={color} />
+    <path d="M14 4h4v4h-4z" fill={color} opacity=".55" />
+  </svg>
+);
+const TotvsLogo = ({ white, height = 20, style }) => (
+  <img src={white ? totvsBranco : totvsAzul} alt="TOTVS" style={{ height, display: "block", ...style }} />
+);
+
 /* ============================== átomos ==================================== */
 const Cap = ({ children, style }) => <div style={{ font: "600 10.5px var(--font-ui)", letterSpacing: ".14em", textTransform: "uppercase", color: "var(--text-muted)", ...style }}>{children}</div>;
 const Card = ({ children, style, mock }) => (
@@ -321,13 +397,20 @@ function GoogleSignIn({ onUser }) {
 
 /* ============================== LOGIN (4b) ================================ */
 function Login({ onEnter, theme, setTheme }) {
+  const t = useT();
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "1fr 500px", minHeight: "100vh", fontFamily: "var(--font-ui)" }}>
+    <div className="login-grid">
       <div style={{ background: "linear-gradient(160deg,#041C2B 0%,#0A2438 100%)", color: "#E7ECF3", padding: "40px 48px", display: "flex", flexDirection: "column", justifyContent: "space-between", gap: 22 }}>
         <div>
-          <div style={{ font: "600 10.5px var(--font-mono)", letterSpacing: ".2em", color: "#8299B0" }}>TOTVS CLOUD</div>
-          <div style={{ font: "700 42px/1 var(--font-ui)", letterSpacing: ".02em", marginTop: 22 }}>CITADEL</div>
-          <div style={{ fontSize: 13.5, color: "#9FB2C4", marginTop: 9 }}>Veja o limite antes de alcançá-lo.</div>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <TotvsLogo white height={26} />
+            <span style={{ font: "600 10.5px var(--font-mono)", letterSpacing: ".2em", color: "#8299B0" }}>CLOUD</span>
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 22 }}>
+            <Logo size={40} color="#F0B45F" />
+            <span style={{ font: "700 42px/1 var(--font-ui)", letterSpacing: ".02em" }}>CITADEL</span>
+          </div>
+          <div style={{ fontSize: 13.5, color: "#9FB2C4", marginTop: 9 }}>{t("Veja o limite antes de alcançá-lo.")}</div>
         </div>
         <div>
           <div style={{ font: "600 10.5px var(--font-ui)", letterSpacing: ".14em", textTransform: "uppercase", color: "#8299B0" }}>risco mais próximo · 27 jul 2026</div>
@@ -357,43 +440,44 @@ function Login({ onEnter, theme, setTheme }) {
       </div>
       <div style={{ background: "var(--surface)", display: "flex", flexDirection: "column", justifyContent: "space-between", padding: "34px 48px", gap: 20 }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <span style={{ font: "600 15px var(--font-ui)", color: "var(--ink)" }}>Bem-vindo de volta</span>
+          <span style={{ display: "inline-flex", gap: 9, alignItems: "center", font: "600 15px var(--font-ui)", color: "var(--ink)" }}><Logo size={20} color="var(--action)" />{t("Bem-vindo de volta")}</span>
           <span style={{ display: "inline-flex", gap: 8, alignItems: "center" }}>
-            <span style={{ font: "400 10.5px var(--font-mono)", color: "var(--text-muted)" }}>plataforma interna</span>
+            <span style={{ font: "400 10.5px var(--font-mono)", color: "var(--text-muted)" }}>{t("plataforma interna")}</span>
+            <LangBtn />
             <button onClick={() => setTheme(theme === "dark" ? "light" : "dark")} title="tema claro/escuro" style={{ border: "1px solid var(--hairline)", background: "transparent", color: "var(--ink)", borderRadius: 6, padding: "3px 9px", cursor: "pointer", font: "600 11px var(--font-mono)" }}>{theme === "dark" ? "☀" : "☾"}</button>
           </span>
         </div>
         <div style={{ borderTop: "1px solid var(--hairline)", borderBottom: "1px solid var(--hairline)", padding: "15px 0" }}>
-          <Cap>nota do dia</Cap>
-          <p style={{ font: "400 15.5px/1.5 var(--font-ui)", color: "var(--petrol-900)", margin: "9px 0 0" }}>“O que não é medido é negociado no susto.”</p>
+          <Cap>{t("nota do dia")}</Cap>
+          <p style={{ font: "400 15.5px/1.5 var(--font-ui)", color: "var(--petrol-900)", margin: "9px 0 0" }}>{t("“O que não é medido é negociado no susto.”")}</p>
           <div style={{ font: "400 10.5px var(--font-mono)", color: "var(--text-muted)", marginTop: 8 }}>Engenharia de Redes · TOTVS Cloud</div>
         </div>
         <div>
-          <div style={{ font: "700 22px var(--font-ui)", color: "var(--petrol-900)" }}>Entrar</div>
-          <p style={{ fontSize: 12.5, color: "var(--text-muted)", margin: "5px 0 0" }}>Acesso restrito às equipes de infraestrutura, operações e gestão.</p>
-          <Btn onClick={onEnter} style={{ width: "100%", marginTop: 18, padding: "11px 12px", fontSize: 13.5 }}>Continuar com SSO TOTVS</Btn>
+          <div style={{ font: "700 22px var(--font-ui)", color: "var(--petrol-900)" }}>{t("Entrar")}</div>
+          <p style={{ fontSize: 12.5, color: "var(--text-muted)", margin: "5px 0 0" }}>{t("Acesso restrito às equipes de infraestrutura, operações e gestão.")}</p>
+          <Btn onClick={onEnter} style={{ width: "100%", marginTop: 18, padding: "11px 12px", fontSize: 13.5 }}>{t("Continuar com SSO TOTVS")}</Btn>
           <GoogleSignIn onUser={() => onEnter()} />
           <div style={{ display: "flex", alignItems: "center", gap: 12, margin: "16px 0", color: "var(--text-muted)", fontSize: 11 }}>
-            <span style={{ flex: 1, height: 1, background: "var(--hairline)" }} />ou<span style={{ flex: 1, height: 1, background: "var(--hairline)" }} />
+            <span style={{ flex: 1, height: 1, background: "var(--hairline)" }} />{t("ou")}<span style={{ flex: 1, height: 1, background: "var(--hairline)" }} />
           </div>
-          <label style={{ display: "block", fontSize: 11.5, color: "var(--text-muted)" }}>Usuário corporativo
+          <label style={{ display: "block", fontSize: 11.5, color: "var(--text-muted)" }}>{t("Usuário corporativo")}
             <input defaultValue="m.ferreira" className="num" style={{ display: "block", width: "100%", marginTop: 5, padding: "9px 10px", border: "1px solid var(--hairline)", borderRadius: 6, background: "var(--bg-page)", color: "var(--ink)", fontSize: 13 }} />
           </label>
-          <label style={{ display: "block", fontSize: 11.5, color: "var(--text-muted)", marginTop: 13 }}>Senha
+          <label style={{ display: "block", fontSize: 11.5, color: "var(--text-muted)", marginTop: 13 }}>{t("Senha")}
             <input type="password" defaultValue="**********" style={{ display: "block", width: "100%", marginTop: 5, padding: "9px 10px", border: "1px solid var(--hairline)", borderRadius: 6, background: "var(--bg-page)", color: "var(--ink)", fontSize: 13 }} />
           </label>
-          <Btn sec onClick={onEnter} style={{ width: "100%", marginTop: 16, padding: "11px 12px", fontSize: 13.5 }}>Entrar</Btn>
+          <Btn sec onClick={onEnter} style={{ width: "100%", marginTop: 16, padding: "11px 12px", fontSize: 13.5 }}>{t("Entrar")}</Btn>
         </div>
         <div>
-          <Cap>status da plataforma</Cap>
+          <Cap>{t("status da plataforma")}</Cap>
           <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: "7px 12px", fontSize: 12, marginTop: 9 }}>
-            <span style={{ color: "var(--text-muted)" }}>coletores respondendo</span><span className="num">46 / 48</span>
-            <span style={{ color: "var(--text-muted)" }}>varredura Corvo (Slack)</span><span className="num">27 jul 20:40</span>
-            <span style={{ color: "var(--text-muted)" }}>sincronização CMDB</span><span className="num">há 9 min</span>
+            <span style={{ color: "var(--text-muted)" }}>{t("coletores respondendo")}</span><span className="num">46 / 48</span>
+            <span style={{ color: "var(--text-muted)" }}>{t("varredura Corvo (Slack)")}</span><span className="num">27 jul 20:40</span>
+            <span style={{ color: "var(--text-muted)" }}>{t("sincronização CMDB")}</span><span className="num">há 9 min</span>
           </div>
         </div>
         <div style={{ display: "flex", justifyContent: "space-between", borderTop: "1px solid var(--hairline)", paddingTop: 13, fontSize: 11, color: "var(--text-muted)" }}>
-          <span>uso interno</span><span className="num">CITADEL v0.1 · protótipo</span>
+          <span>{t("uso interno")}</span><span className="num">CITADEL v0.1 · protótipo</span>
         </div>
       </div>
     </div>
@@ -552,6 +636,7 @@ function Muralha() {
       <div style={{ display: "flex", justifyContent: "space-between", padding: "15px 18px 10px" }}>
         <Cap>limites de plataforma — uso × operacional × fabricante</Cap><Chip m="EST" s="mock — aguardando coletores" />
       </div>
+      <div className="tscroll">
       <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5 }}>
         <thead><tr style={{ borderTop: "1px solid var(--hairline)", borderBottom: "1px solid var(--hairline-strong)" }}>
           {["plataforma", "recurso", "edge", "uso", "limite op", "fabricante", "folga op", "fonte do limite"].map((h, i) => (
@@ -575,6 +660,7 @@ function Muralha() {
           );
         })}</tbody>
       </table>
+      </div>
       <div style={{ padding: "10px 18px 14px", fontSize: 11, color: "var(--text-muted)", fontFamily: "var(--font-mono)" }}>limite operacional ≠ limite de fabricante — premissa auditada, editável com histórico</div>
     </Card>
   );
@@ -669,6 +755,7 @@ function Arquivo() {
 const inputCss = { padding: "8px 10px", border: "1px solid var(--hairline)", borderRadius: 6, background: "var(--bg-page)", color: "var(--ink)", fontSize: 12.5, fontFamily: "var(--font-ui)" };
 
 function Vigia() {
+  const t = useT();
   const [sites, setSites] = useState([]);
   const [dt, setDt] = useState(null);
   const [busy, setBusy] = useState(false);
@@ -750,17 +837,17 @@ function Vigia() {
   return (
     <div style={{ display: "grid", gap: 14 }}>
       <Card style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", padding: "12px 16px" }}>
-        <Cap style={{ marginRight: 2 }}>downtimes ativos · {sites.length} sites federados</Cap>
+        <Cap style={{ marginRight: 2 }}>{t("downtimes ativos")} · {sites.length} {t("sites federados")}</Cap>
         <select value={fSite} onChange={(e) => { setFSite(e.target.value); load(e.target.value, fTipo); }} style={inputCss}>
-          <option value="">todos os sites</option>
+          <option value="">{t("todos os sites")}</option>
           {sites.map((s) => <option key={s.id} value={s.id}>{s.id}</option>)}
         </select>
         <select value={fTipo} onChange={(e) => { setFTipo(e.target.value); load(fSite, e.target.value); }} style={inputCss}>
-          <option value="all">host + serviço</option>
-          <option value="host">só host</option>
-          <option value="service">só serviço</option>
+          <option value="all">{t("host + serviço")}</option>
+          <option value="host">{t("só host")}</option>
+          <option value="service">{t("só serviço")}</option>
         </select>
-        <Btn sec onClick={() => load()} disabled={busy} style={{ marginLeft: "auto" }}>{busy ? "…" : "Atualizar"}</Btn>
+        <Btn sec onClick={() => load()} disabled={busy} style={{ marginLeft: "auto" }}>{busy ? "…" : t("Atualizar")}</Btn>
         <Chip m="OBS" s="Checkmk · tempo real" />
       </Card>
       {err && <Card style={{ borderColor: "var(--state-crit)", color: "var(--state-crit)", fontSize: 12.5 }}>Falha ao consultar a API: {err} — o backend (:5533) está de pé?</Card>}
@@ -772,11 +859,12 @@ function Vigia() {
       )}
       <Card style={{ padding: 0, overflow: "hidden" }}>
         <div style={{ display: "flex", justifyContent: "space-between", padding: "15px 18px 10px" }}>
-          <Cap>silenciados agora · {dt ? dt.total : "…"}</Cap><Chip m="OBS" s="gateway federado" />
+          <Cap>{t("silenciados agora")} · {dt ? dt.total : "…"}</Cap><Chip m="OBS" s="gateway federado" />
         </div>
         {!dt || dt.itens.length === 0 ? (
-          <div style={{ padding: "22px 18px", textAlign: "center", color: "var(--text-muted)", fontSize: 12.5 }}>{dt ? "Nenhum downtime ativo no recorte." : "carregando…"}</div>
+          <div style={{ padding: "22px 18px", textAlign: "center", color: "var(--text-muted)", fontSize: 12.5 }}>{dt ? t("Nenhum downtime ativo no recorte.") : t("carregando…")}</div>
         ) : (
+          <div className="tscroll">
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5 }}>
             <thead><tr style={{ borderTop: "1px solid var(--hairline)", borderBottom: "1px solid var(--hairline-strong)" }}>
               {["site", "host", "serviço", "autor", "comentário", ""].map((h, i) => (
@@ -787,18 +875,19 @@ function Vigia() {
               <tr key={i} style={{ borderBottom: "1px solid var(--hairline)" }}>
                 <td className="num" style={{ padding: "8px 14px" }}>{it.site}</td>
                 <td className="num" style={{ padding: "8px 14px" }}>{it.host}</td>
-                <td style={{ padding: "8px 14px" }}>{it.servico || <span style={{ color: "var(--text-faint)" }}>host inteiro</span>}</td>
+                <td style={{ padding: "8px 14px" }}>{it.servico || <span style={{ color: "var(--text-faint)" }}>{t("host inteiro")}</span>}</td>
                 <td style={{ padding: "8px 14px" }}>{it.autor}</td>
                 <td style={{ padding: "8px 14px", color: "var(--text-muted)", maxWidth: 260, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{it.comentario}</td>
-                <td style={{ padding: "8px 14px", textAlign: "right" }}><Btn sec disabled={busy} onClick={() => remover(it)} style={{ padding: "4px 10px", fontSize: 11 }}>remover</Btn></td>
+                <td style={{ padding: "8px 14px", textAlign: "right" }}><Btn sec disabled={busy} onClick={() => remover(it)} style={{ padding: "4px 10px", fontSize: 11 }}>{t("remover")}</Btn></td>
               </tr>
             ))}</tbody>
           </table>
+          </div>
         )}
       </Card>
       <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) minmax(0,1fr)", gap: 14 }}>
         <Card>
-          <Cap>novo silêncio</Cap>
+          <Cap>{t("novo silêncio")}</Cap>
           <div style={{ display: "grid", gap: 9, marginTop: 12 }}>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 9 }}>
               <select value={nv.site} onChange={(e) => setNv({ ...nv, site: e.target.value })} style={inputCss}>
@@ -809,21 +898,21 @@ function Vigia() {
             </div>
             <div style={{ display: "grid", gridTemplateColumns: "110px 1fr", gap: 9 }}>
               <input type="number" min={1} value={nv.minutes} onChange={(e) => setNv({ ...nv, minutes: e.target.value })} style={inputCss} title="minutos" />
-              <input placeholder="serviços (vírgula) — vazio = host inteiro" value={nv.servicos} onChange={(e) => setNv({ ...nv, servicos: e.target.value })} style={inputCss} />
+              <input placeholder={t("serviços (vírgula) — vazio = host inteiro")} value={nv.servicos} onChange={(e) => setNv({ ...nv, servicos: e.target.value })} style={inputCss} />
             </div>
-            <input placeholder="comentário (obrigatório)" value={nv.comment} onChange={(e) => setNv({ ...nv, comment: e.target.value })} style={inputCss} />
-            <Btn onClick={criar} disabled={busy}>Silenciar</Btn>
+            <input placeholder={t("comentário (obrigatório)")} value={nv.comment} onChange={(e) => setNv({ ...nv, comment: e.target.value })} style={inputCss} />
+            <Btn onClick={criar} disabled={busy}>{t("Silenciar")}</Btn>
           </div>
         </Card>
         <Card>
-          <div style={{ display: "flex", justifyContent: "space-between" }}><Cap>silêncio por RDM (lote)</Cap><Chip m="OBS" s="mata o storm 24–25 mai" /></div>
+          <div style={{ display: "flex", justifyContent: "space-between" }}><Cap>{t("silêncio por RDM (lote)")}</Cap><Chip m="OBS" s="mata o storm 24–25 mai" /></div>
           <div style={{ display: "grid", gap: 9, marginTop: 12 }}>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 110px", gap: 9 }}>
               <input placeholder="RDM (ex.: 549523)" value={rdm.rdm} onChange={(e) => setRdm({ ...rdm, rdm: e.target.value })} style={inputCss} />
               <input type="number" min={1} value={rdm.minutes} onChange={(e) => setRdm({ ...rdm, minutes: e.target.value })} style={inputCss} title="minutos" />
             </div>
             <textarea rows={4} placeholder={"uma linha por alvo: site host [serv1,serv2]\ntesp3 fw01-tesp3\ntesp5 edge02 CPU,Memory"} value={rdm.plan} onChange={(e) => setRdm({ ...rdm, plan: e.target.value })} style={{ ...inputCss, fontFamily: "var(--font-mono)", resize: "vertical" }} />
-            <Btn onClick={rdmCriar} disabled={busy}>Aplicar janela</Btn>
+            <Btn onClick={rdmCriar} disabled={busy}>{t("Aplicar janela")}</Btn>
           </div>
         </Card>
       </div>
@@ -916,16 +1005,24 @@ const RAIL = {
 
 function Shell({ theme, setTheme, onLogout }) {
   const [mod, setMod] = useState("corvo");
-  const [t, s] = TITLES[mod];
+  const [railOn, setRailOn] = useState(true);
+  const t = useT();
+  const [title, sub] = TITLES[mod];
   const rail = RAIL[mod];
   const Body = { conselho: Conselho, tresolhos: TresOlhos, corvo: Corvo, vigia: Vigia, muralha: Muralha, dominios: Dominios, arquivo: Arquivo, tesouro: Tesouro, campanhas: Campanhas, meistre: Meistre }[mod];
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "var(--sidebar-w) 1fr var(--rail-w)", minHeight: "100vh", background: "var(--bg-page)", fontFamily: "var(--font-ui)", color: "var(--ink)" }}>
+    <div className={"shell" + (railOn ? "" : " norail")}>
       {/* sidebar 228 */}
       <div style={{ background: "var(--surface)", borderRight: "1px solid var(--hairline)", display: "flex", flexDirection: "column", position: "sticky", top: 0, height: "100vh" }}>
         <div style={{ padding: "16px 16px 13px", borderBottom: "1px solid var(--hairline)" }}>
-          <div style={{ font: "600 9.5px var(--font-mono)", letterSpacing: ".2em", color: "var(--text-muted)" }}>TOTVS CLOUD</div>
-          <div style={{ font: "700 19px var(--font-ui)", letterSpacing: ".03em", color: "var(--petrol-900)", marginTop: 7 }}>CITADEL</div>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <TotvsLogo white={theme === "dark"} height={15} />
+            <span style={{ font: "600 9.5px var(--font-mono)", letterSpacing: ".2em", color: "var(--text-muted)" }}>CLOUD</span>
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 9 }}>
+            <Logo size={22} color="var(--action)" />
+            <span style={{ font: "700 19px var(--font-ui)", letterSpacing: ".03em", color: "var(--petrol-900)" }}>CITADEL</span>
+          </div>
         </div>
         <nav style={{ paddingTop: 8, flex: 1, overflowY: "auto" }}>
           {MODULES.map((m) => {
@@ -936,9 +1033,9 @@ function Shell({ theme, setTheme, onLogout }) {
                 padding: "8px 16px", border: "none", cursor: "pointer", background: on ? "var(--selection)" : "transparent",
                 boxShadow: on ? "inset 2px 0 var(--action)" : "none",
               }}>
-                <span style={{ font: `${on ? 600 : 500} 13px var(--font-ui)`, color: on ? "var(--petrol-900)" : "var(--ink)" }}>{m.n}</span>
+                <span style={{ font: `${on ? 600 : 500} 13px var(--font-ui)`, color: on ? "var(--petrol-900)" : "var(--ink)" }}>{t(m.n)}</span>
                 <span className="num" style={{ fontSize: 10.5, color: m.hot ? "var(--state-warn)" : m.count ? "var(--text-muted)" : "transparent" }}>{m.count || "·"}</span>
-                <span style={{ fontSize: 10.5, color: "var(--text-muted)", gridColumn: "1/2" }}>{m.d}</span>
+                <span style={{ fontSize: 10.5, color: "var(--text-muted)", gridColumn: "1/2" }}>{t(m.d)}</span>
               </button>
             );
           })}
@@ -949,30 +1046,35 @@ function Shell({ theme, setTheme, onLogout }) {
           </button>
           <div style={{ display: "flex", alignItems: "center", gap: 8, borderTop: "1px solid var(--hairline)", paddingTop: 10 }}>
             <span style={{ width: 24, height: 24, borderRadius: "50%", background: "var(--selection)", color: "var(--petrol-900)", font: "600 10px var(--font-ui)", display: "flex", alignItems: "center", justifyContent: "center" }}>MF</span>
-            <span style={{ fontSize: 11.5, lineHeight: 1.3 }}>m.ferreira<br /><a href="#" onClick={(e) => { e.preventDefault(); onLogout(); }} style={{ fontSize: 10.5 }}>Sair</a></span>
-            <button onClick={() => setTheme(theme === "dark" ? "light" : "dark")} title="tema" style={{ marginLeft: "auto", border: "1px solid var(--hairline)", background: "transparent", color: "var(--ink)", borderRadius: 6, padding: "2px 8px", cursor: "pointer", font: "600 11px var(--font-mono)" }}>{theme === "dark" ? "☀" : "☾"}</button>
+            <span style={{ fontSize: 11.5, lineHeight: 1.3 }}>m.ferreira<br /><a href="#" onClick={(e) => { e.preventDefault(); onLogout(); }} style={{ fontSize: 10.5 }}>{t("Sair")}</a></span>
+            <LangBtn style={{ marginLeft: "auto", padding: "2px 8px" }} />
+            <button onClick={() => setTheme(theme === "dark" ? "light" : "dark")} title="tema" style={{ border: "1px solid var(--hairline)", background: "transparent", color: "var(--ink)", borderRadius: 6, padding: "2px 8px", cursor: "pointer", font: "600 11px var(--font-mono)" }}>{theme === "dark" ? "☀" : "☾"}</button>
           </div>
         </div>
       </div>
       {/* painel central */}
       <div style={{ minWidth: 0, display: "flex", flexDirection: "column" }}>
-        <div style={{ padding: "13px 24px", borderBottom: "1px solid var(--hairline)", background: "var(--surface)", position: "sticky", top: 0, zIndex: 2 }}>
-          <div style={{ font: "600 15px var(--font-ui)", color: "var(--petrol-900)" }}>{t}</div>
-          <div style={{ fontSize: 11.5, color: "var(--text-muted)", marginTop: 2 }}>{s}</div>
+        <div style={{ padding: "13px 24px", borderBottom: "1px solid var(--hairline)", background: "var(--surface)", position: "sticky", top: 0, zIndex: 2, display: "flex", alignItems: "center", gap: 12 }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ font: "600 15px var(--font-ui)", color: "var(--petrol-900)" }}>{t(title)}</div>
+            <div style={{ fontSize: 11.5, color: "var(--text-muted)", marginTop: 2 }}>{t(sub)}</div>
+          </div>
+          <button onClick={() => setRailOn((v) => !v)} title={railOn ? t("ocultar painel lateral") : t("mostrar painel lateral")}
+            style={{ border: "1px solid var(--hairline)", background: railOn ? "var(--selection)" : "transparent", color: "var(--ink)", borderRadius: 6, padding: "3px 9px", cursor: "pointer", font: "600 12px var(--font-mono)" }}>◧</button>
         </div>
-        <div style={{ padding: "18px 24px 40px", flex: 1 }}><Body go={setMod} /></div>
+        <div style={{ padding: "18px 24px 40px", flex: 1, minWidth: 0 }}><Body go={setMod} /></div>
       </div>
       {/* rail 316 */}
-      <div style={{ borderLeft: "1px solid var(--hairline)", background: "var(--surface)", padding: "18px 20px", position: "sticky", top: 0, height: "100vh", display: "flex", flexDirection: "column", gap: 18 }}>
+      <div className="rail" style={{ borderLeft: "1px solid var(--hairline)", background: "var(--surface)", padding: "18px 20px", position: "sticky", top: 0, height: "100vh", flexDirection: "column", gap: 18 }}>
         <div>
-          <Cap>procedência</Cap>
+          <Cap>{t("procedência")}</Cap>
           <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: "7px 10px", fontSize: 11.5, marginTop: 9 }}>
             {rail.prov.map(([k, v], i) => <React.Fragment key={i}><span style={{ color: "var(--text-muted)" }}>{k}</span><span className="num" style={{ textAlign: "right" }}>{v}</span></React.Fragment>)}
           </div>
         </div>
         {rail.acts.length > 0 && (
           <div>
-            <Cap>ações</Cap>
+            <Cap>{t("ações")}</Cap>
             <div style={{ display: "grid", gap: 8, marginTop: 9 }}>
               {rail.acts.map((a, i) => <Btn key={i} sec={i > 0} style={{ width: "100%" }}>{a}</Btn>)}
             </div>
@@ -990,12 +1092,16 @@ function Shell({ theme, setTheme, onLogout }) {
 export default function CitadelApp() {
   const [authed, setAuthed] = useState(false);
   const [theme, setTheme] = useState("light");
+  const [lang, setLangState] = useState(() => localStorage.getItem("citadel_lang") || "pt");
+  const setLang = (l) => { localStorage.setItem("citadel_lang", l); setLangState(l); };
   return (
-    <div data-theme={theme} style={{ minHeight: "100vh", background: "var(--bg-page)" }}>
-      <style>{CSS}</style>
-      {authed
-        ? <Shell theme={theme} setTheme={setTheme} onLogout={() => setAuthed(false)} />
-        : <Login onEnter={() => setAuthed(true)} theme={theme} setTheme={setTheme} />}
-    </div>
+    <LangCtx.Provider value={[lang, setLang]}>
+      <div data-theme={theme} style={{ minHeight: "100vh", background: "var(--bg-page)" }}>
+        <style>{CSS}</style>
+        {authed
+          ? <Shell theme={theme} setTheme={setTheme} onLogout={() => setAuthed(false)} />
+          : <Login onEnter={() => setAuthed(true)} theme={theme} setTheme={setTheme} />}
+      </div>
+    </LangCtx.Provider>
   );
 }
