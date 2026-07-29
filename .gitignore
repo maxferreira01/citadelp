@@ -15,6 +15,7 @@ frontend/dist/
 !.env.example
 sites.yml
 *.secret
+secrets/
 # artefatos
 data/
 *.log

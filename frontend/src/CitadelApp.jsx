@@ -176,6 +176,7 @@ const MODULES = [
   { id: "conselho", n: "Conselho", d: "visão executiva", count: 2 },
   { id: "tresolhos", n: "Três Olhos", d: "capacidade e previsão", count: 4 },
   { id: "corvo", n: "Corvo", d: "sinais e integrações", count: 55, hot: true },
+  { id: "vigia", n: "Vigia", d: "Checkmk · downtimes reais" },
   { id: "muralha", n: "Muralha", d: "limites de plataforma", count: 3 },
   { id: "dominios", n: "Domínios", d: "datacenters e topologia" },
   { id: "arquivo", n: "Arquivo", d: "wiki e runbooks" },
@@ -209,6 +210,21 @@ const Btn = ({ children, sec, onClick, style, disabled }) => (
     borderRadius: "var(--radius)", padding: "8px 14px", font: "600 12.5px var(--font-ui)", ...style,
   }}>{children}</button>
 );
+
+/* API CITADEL — proxy do vite: /api/* → uvicorn :5533 */
+async function api(path, opts = {}) {
+  const token = sessionStorage.getItem("citadel_token");
+  const res = await fetch("/api" + path, {
+    headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+    ...opts,
+  });
+  if (!res.ok) {
+    let detail = "";
+    try { detail = (await res.json()).detail || ""; } catch { /* corpo não-JSON */ }
+    throw new Error(detail || `HTTP ${res.status}`);
+  }
+  return res.json();
+}
 
 /* Trajetória — sólida=observado · tracejada=projetado · âmbar=limite op.     */
 function Trajectory({ hist, proj, op, tech, h = 150 }) {
@@ -249,6 +265,56 @@ function Runway({ name, usage, op, tech, days, conf, st, sel, onClick }) {
         {st !== "nocollect" && <div style={{ position: "absolute", inset: "0 auto 0 0", width: pct + "%", background: "var(--action)", borderRadius: 4, opacity: .9 }} />}
         <div style={{ position: "absolute", top: -2, bottom: -2, left: opPct + "%", width: 2, background: "var(--cap-limit-op)" }} />
       </div>
+    </div>
+  );
+}
+
+/* ====================== LOGIN GOOGLE (GIS + backend) ====================== */
+function GoogleSignIn({ onUser }) {
+  const ref = React.useRef(null);
+  const [state, setState] = useState("carregando");
+  React.useEffect(() => {
+    let dead = false;
+    (async () => {
+      try {
+        const cfg = await api("/auth/config");
+        if (dead) return;
+        if (!cfg.google) { setState("ausente"); return; }
+        const s = document.createElement("script");
+        s.src = "https://accounts.google.com/gsi/client";
+        s.async = true;
+        s.onload = () => {
+          if (dead || !window.google) return;
+          window.google.accounts.id.initialize({
+            client_id: cfg.google_client_id,
+            callback: async (resp) => {
+              try {
+                const out = await api("/auth/google", { method: "POST", body: JSON.stringify({ credential: resp.credential }) });
+                sessionStorage.setItem("citadel_token", out.token);
+                onUser(out.user);
+              } catch { setState("erro"); }
+            },
+          });
+          window.google.accounts.id.renderButton(ref.current, { theme: "outline", size: "large", width: 380 });
+          setState("pronto");
+        };
+        s.onerror = () => !dead && setState("erro");
+        document.head.appendChild(s);
+      } catch { !dead && setState("ausente"); }
+    })();
+    return () => { dead = true; };
+  }, []);
+  return (
+    <div style={{ marginTop: 14 }}>
+      <div ref={ref} style={{ display: state === "pronto" ? "flex" : "none", justifyContent: "center" }} />
+      {state === "ausente" && (
+        <div style={{ fontSize: 11, color: "var(--text-muted)", textAlign: "center", border: "1px dashed var(--hairline)", borderRadius: 6, padding: "9px 10px" }}>
+          Login Google indisponível — defina <span className="num">GOOGLE_CLIENT_ID</span> no .env do backend.
+        </div>
+      )}
+      {state === "erro" && (
+        <div style={{ fontSize: 11, color: "var(--state-crit)", textAlign: "center", padding: "6px 0" }}>Falha no login Google. Tente novamente.</div>
+      )}
     </div>
   );
 }
@@ -306,6 +372,7 @@ function Login({ onEnter, theme, setTheme }) {
           <div style={{ font: "700 22px var(--font-ui)", color: "var(--petrol-900)" }}>Entrar</div>
           <p style={{ fontSize: 12.5, color: "var(--text-muted)", margin: "5px 0 0" }}>Acesso restrito às equipes de infraestrutura, operações e gestão.</p>
           <Btn onClick={onEnter} style={{ width: "100%", marginTop: 18, padding: "11px 12px", fontSize: 13.5 }}>Continuar com SSO TOTVS</Btn>
+          <GoogleSignIn onUser={() => onEnter()} />
           <div style={{ display: "flex", alignItems: "center", gap: 12, margin: "16px 0", color: "var(--text-muted)", fontSize: 11 }}>
             <span style={{ flex: 1, height: 1, background: "var(--hairline)" }} />ou<span style={{ flex: 1, height: 1, background: "var(--hairline)" }} />
           </div>
@@ -598,6 +665,172 @@ function Arquivo() {
   );
 }
 
+/* ----------------- VIGIA — gateway Checkmk federado (OBS) ----------------- */
+const inputCss = { padding: "8px 10px", border: "1px solid var(--hairline)", borderRadius: 6, background: "var(--bg-page)", color: "var(--ink)", fontSize: 12.5, fontFamily: "var(--font-ui)" };
+
+function Vigia() {
+  const [sites, setSites] = useState([]);
+  const [dt, setDt] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  const [msg, setMsg] = useState("");
+  const [fSite, setFSite] = useState("");
+  const [fTipo, setFTipo] = useState("all");
+  const [nv, setNv] = useState({ site: "", host_name: "", minutes: 60, comment: "", servicos: "" });
+  const [rdm, setRdm] = useState({ rdm: "", minutes: 120, plan: "" });
+
+  const load = async (site = fSite, tipo = fTipo) => {
+    setBusy(true); setErr("");
+    try {
+      const qs = new URLSearchParams();
+      if (site) qs.set("site", site);
+      if (tipo !== "all") qs.set("tipo", tipo);
+      const [s, d] = await Promise.all([
+        api("/checkmk/sites"),
+        api("/checkmk/downtimes" + (qs.toString() ? `?${qs}` : "")),
+      ]);
+      setSites(s); setDt(d);
+    } catch (e) { setErr(String(e.message || e)); }
+    setBusy(false);
+  };
+  React.useEffect(() => { load(); }, []);
+
+  const criar = async () => {
+    if (!nv.site || !nv.host_name || !nv.comment) { setMsg("preencha site, host e comentário"); return; }
+    setBusy(true); setMsg("");
+    try {
+      const servicos = nv.servicos.split(",").map((s) => s.trim()).filter(Boolean);
+      await api("/checkmk/downtimes", {
+        method: "POST",
+        body: JSON.stringify({ site: nv.site, host_name: nv.host_name, minutes: +nv.minutes, comment: nv.comment, servicos: servicos.length ? servicos : null }),
+      });
+      setMsg(`downtime criado: ${nv.host_name} · ${nv.minutes} min`);
+      setNv({ site: "", host_name: "", minutes: 60, comment: "", servicos: "" });
+      load();
+    } catch (e) { setMsg("erro: " + e.message); }
+    setBusy(false);
+  };
+
+  const remover = async (item, forcar = false) => {
+    setBusy(true); setMsg("");
+    try {
+      const out = await api("/checkmk/downtimes/remover", {
+        method: "POST",
+        body: JSON.stringify({ alvos: [{ site: item.site, id: String(item.id), host: item.host, servico: item.servico }], forcar_por_host: forcar }),
+      });
+      const r = out.recibos[0];
+      if (r.requer_confirmacao && !forcar) {
+        if (window.confirm(`Remoção por ID não resolveu neste site. Remover por host apaga ${r.atingidos ?? "TODOS os"} downtimes de ${item.host}. Continuar?`)) {
+          await remover(item, true);
+          return;
+        }
+        setMsg("remoção cancelada");
+      } else setMsg(r.ok ? `removido: ${item.host}${item.servico ? " · " + item.servico : ""}` : "falhou: " + (r.erro || "confira o site"));
+      load();
+    } catch (e) { setMsg("erro: " + e.message); }
+    setBusy(false);
+  };
+
+  const rdmCriar = async () => {
+    const plan = rdm.plan.split("\n").map((l) => l.trim()).filter(Boolean).map((l) => {
+      const [site, host, servs] = l.split(/\s+/);
+      return { site, host, services: servs ? servs.split(",").filter(Boolean) : null };
+    });
+    if (!rdm.rdm || !plan.length) { setMsg("informe a RDM e ao menos uma linha: site host [serv1,serv2]"); return; }
+    setBusy(true); setMsg("");
+    try {
+      const out = await api("/checkmk/downtimes/rdm", { method: "POST", body: JSON.stringify({ rdm: rdm.rdm, minutes: +rdm.minutes, plan }) });
+      setMsg(out.ok ? `RDM ${rdm.rdm}: ${out.receipts.length} silêncios aplicados` : `RDM ${rdm.rdm}: parcial — confira os recibos no backend`);
+      setRdm({ rdm: "", minutes: 120, plan: "" });
+      load();
+    } catch (e) { setMsg("erro: " + e.message); }
+    setBusy(false);
+  };
+
+  return (
+    <div style={{ display: "grid", gap: 14 }}>
+      <Card style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", padding: "12px 16px" }}>
+        <Cap style={{ marginRight: 2 }}>downtimes ativos · {sites.length} sites federados</Cap>
+        <select value={fSite} onChange={(e) => { setFSite(e.target.value); load(e.target.value, fTipo); }} style={inputCss}>
+          <option value="">todos os sites</option>
+          {sites.map((s) => <option key={s.id} value={s.id}>{s.id}</option>)}
+        </select>
+        <select value={fTipo} onChange={(e) => { setFTipo(e.target.value); load(fSite, e.target.value); }} style={inputCss}>
+          <option value="all">host + serviço</option>
+          <option value="host">só host</option>
+          <option value="service">só serviço</option>
+        </select>
+        <Btn sec onClick={() => load()} disabled={busy} style={{ marginLeft: "auto" }}>{busy ? "…" : "Atualizar"}</Btn>
+        <Chip m="OBS" s="Checkmk · tempo real" />
+      </Card>
+      {err && <Card style={{ borderColor: "var(--state-crit)", color: "var(--state-crit)", fontSize: 12.5 }}>Falha ao consultar a API: {err} — o backend (:5533) está de pé?</Card>}
+      {msg && <Card style={{ padding: "10px 16px", fontSize: 12.5, fontFamily: "var(--font-mono)" }}>{msg}</Card>}
+      {dt && dt.erros.length > 0 && (
+        <Card style={{ borderColor: "var(--state-warn)", padding: "10px 16px", fontSize: 12 }}>
+          {dt.erros.map((e, i) => <div key={i}><St st="warn" label={e.site} /> <span style={{ color: "var(--text-muted)" }}>{e.erro}</span></div>)}
+        </Card>
+      )}
+      <Card style={{ padding: 0, overflow: "hidden" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", padding: "15px 18px 10px" }}>
+          <Cap>silenciados agora · {dt ? dt.total : "…"}</Cap><Chip m="OBS" s="gateway federado" />
+        </div>
+        {!dt || dt.itens.length === 0 ? (
+          <div style={{ padding: "22px 18px", textAlign: "center", color: "var(--text-muted)", fontSize: 12.5 }}>{dt ? "Nenhum downtime ativo no recorte." : "carregando…"}</div>
+        ) : (
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5 }}>
+            <thead><tr style={{ borderTop: "1px solid var(--hairline)", borderBottom: "1px solid var(--hairline-strong)" }}>
+              {["site", "host", "serviço", "autor", "comentário", ""].map((h, i) => (
+                <th key={i} style={{ textAlign: "left", padding: "7px 14px", font: "600 10px var(--font-ui)", letterSpacing: ".14em", textTransform: "uppercase", color: "var(--text-muted)" }}>{h}</th>
+              ))}
+            </tr></thead>
+            <tbody>{dt.itens.map((it, i) => (
+              <tr key={i} style={{ borderBottom: "1px solid var(--hairline)" }}>
+                <td className="num" style={{ padding: "8px 14px" }}>{it.site}</td>
+                <td className="num" style={{ padding: "8px 14px" }}>{it.host}</td>
+                <td style={{ padding: "8px 14px" }}>{it.servico || <span style={{ color: "var(--text-faint)" }}>host inteiro</span>}</td>
+                <td style={{ padding: "8px 14px" }}>{it.autor}</td>
+                <td style={{ padding: "8px 14px", color: "var(--text-muted)", maxWidth: 260, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{it.comentario}</td>
+                <td style={{ padding: "8px 14px", textAlign: "right" }}><Btn sec disabled={busy} onClick={() => remover(it)} style={{ padding: "4px 10px", fontSize: 11 }}>remover</Btn></td>
+              </tr>
+            ))}</tbody>
+          </table>
+        )}
+      </Card>
+      <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) minmax(0,1fr)", gap: 14 }}>
+        <Card>
+          <Cap>novo silêncio</Cap>
+          <div style={{ display: "grid", gap: 9, marginTop: 12 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 9 }}>
+              <select value={nv.site} onChange={(e) => setNv({ ...nv, site: e.target.value })} style={inputCss}>
+                <option value="">site…</option>
+                {sites.map((s) => <option key={s.id} value={s.id}>{s.id}</option>)}
+              </select>
+              <input placeholder="host" value={nv.host_name} onChange={(e) => setNv({ ...nv, host_name: e.target.value })} style={inputCss} />
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "110px 1fr", gap: 9 }}>
+              <input type="number" min={1} value={nv.minutes} onChange={(e) => setNv({ ...nv, minutes: e.target.value })} style={inputCss} title="minutos" />
+              <input placeholder="serviços (vírgula) — vazio = host inteiro" value={nv.servicos} onChange={(e) => setNv({ ...nv, servicos: e.target.value })} style={inputCss} />
+            </div>
+            <input placeholder="comentário (obrigatório)" value={nv.comment} onChange={(e) => setNv({ ...nv, comment: e.target.value })} style={inputCss} />
+            <Btn onClick={criar} disabled={busy}>Silenciar</Btn>
+          </div>
+        </Card>
+        <Card>
+          <div style={{ display: "flex", justifyContent: "space-between" }}><Cap>silêncio por RDM (lote)</Cap><Chip m="OBS" s="mata o storm 24–25 mai" /></div>
+          <div style={{ display: "grid", gap: 9, marginTop: 12 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 110px", gap: 9 }}>
+              <input placeholder="RDM (ex.: 549523)" value={rdm.rdm} onChange={(e) => setRdm({ ...rdm, rdm: e.target.value })} style={inputCss} />
+              <input type="number" min={1} value={rdm.minutes} onChange={(e) => setRdm({ ...rdm, minutes: e.target.value })} style={inputCss} title="minutos" />
+            </div>
+            <textarea rows={4} placeholder={"uma linha por alvo: site host [serv1,serv2]\ntesp3 fw01-tesp3\ntesp5 edge02 CPU,Memory"} value={rdm.plan} onChange={(e) => setRdm({ ...rdm, plan: e.target.value })} style={{ ...inputCss, fontFamily: "var(--font-mono)", resize: "vertical" }} />
+            <Btn onClick={rdmCriar} disabled={busy}>Aplicar janela</Btn>
+          </div>
+        </Card>
+      </div>
+    </div>
+  );
+}
+
 /* ------------------------- MEISTRE ✦ (funcional) -------------------------- */
 const MEISTRE_CTX = `Você é o Meistre ✦, assistente da plataforma CITADEL (TOTVS Cloud, infraestrutura de redes, 12 datacenters). Tom: direto, técnico, calmo, orientado a ação; PT-BR; sem linguagem medieval; cite a procedência (OBS/CALC/EST-mock) e diga quando um dado é simulado. Dados carregados na sessão:
 [OBS · varredura Slack #alert-float-ip 20mai-27jul/2026] 55 alertas de float IP. Ranking bruto: TECE C1=12, TESP3 C2=11, TESP3 C3=7, TESP6 C3=6. Expurgando 18 esperados (janelas de RDM 549523 em mai e limpeza de disco NSX 21-22 jun): TESP3 C3=7, TESP6 C3=6, TESP3 C2=5, TESP3 C1=5. TESP03=27 alertas no total (79% de julho). 32% dos disparos entre 00h-06h. Storm 21 jul 10:51-10:52: 5 clusters TESP3 em 60s, correlato INC12065 (FW físico CPU 100%, packet buffer, vlan 1019/seginfo). Storm TESP6 20 mai (11 disparos, perda de pacote) sem tratamento registrado. Alerta 27 jul 02:18 ficou 13h42 sem atuação. Melhorias propostas em 30 jun e pendentes: confirmação em 2 passadas, check_icmp, sonda TCP.
@@ -660,6 +893,7 @@ const TITLES = {
   conselho: ["Conselho — visão executiva", "síntese para decisão · 27 jul 2026"],
   tresolhos: ["Três Olhos — capacidade e previsão", "trajetórias, runways e limites"],
   corvo: ["Corvo — sinais", "raio-x do canal #alert-float-ip · funcionalidade piloto"],
+  vigia: ["Vigia — Checkmk federado", "downtimes reais em 5 sites · criar, listar e remover silêncios"],
   muralha: ["Muralha — limites de plataforma", "uso × alvo operacional × fabricante"],
   dominios: ["Domínios — datacenters", "estado por edge"],
   arquivo: ["Arquivo — runbooks", "fonte de verdade operacional"],
@@ -669,6 +903,7 @@ const TITLES = {
 };
 const RAIL = {
   corvo: { prov: [["origem", "Slack C05JX7J5MMY"], ["última varredura", "27 jul 20:40"], ["método", "OBS · parser v1"], ["esperados (MAN)", "18 alertas"]], acts: ["Abrir plano p/ TESP3 C3", "Exportar raio-x (PDF)", "Agendar varredura diária"] },
+  vigia: { prov: [["origem", "API Checkmk · 5 sites"], ["método", "OBS · gateway federado"], ["transporte", "REST + Livestatus query"]], acts: [] },
   tresolhos: { prov: [["origem", "mock — brief/planilhas"], ["método", "EST · linear v1"], ["confiança", "79–91 %"]], acts: ["Abrir plano de ação", "Comparar domínios"] },
   conselho: { prov: [["capacidade", "EST · mock"], ["sinais", "OBS · Slack"], ["tesouro", "EST · mock"]], acts: ["Exportar resumo executivo"] },
   muralha: { prov: [["limites op", "MAN · premissa auditada"], ["uso", "EST · mock"]], acts: ["Editar premissa de limite"] },
@@ -683,7 +918,7 @@ function Shell({ theme, setTheme, onLogout }) {
   const [mod, setMod] = useState("corvo");
   const [t, s] = TITLES[mod];
   const rail = RAIL[mod];
-  const Body = { conselho: Conselho, tresolhos: TresOlhos, corvo: Corvo, muralha: Muralha, dominios: Dominios, arquivo: Arquivo, tesouro: Tesouro, campanhas: Campanhas, meistre: Meistre }[mod];
+  const Body = { conselho: Conselho, tresolhos: TresOlhos, corvo: Corvo, vigia: Vigia, muralha: Muralha, dominios: Dominios, arquivo: Arquivo, tesouro: Tesouro, campanhas: Campanhas, meistre: Meistre }[mod];
   return (
     <div style={{ display: "grid", gridTemplateColumns: "var(--sidebar-w) 1fr var(--rail-w)", minHeight: "100vh", background: "var(--bg-page)", fontFamily: "var(--font-ui)", color: "var(--ink)" }}>
       {/* sidebar 228 */}
