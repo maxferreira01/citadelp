@@ -1,9 +1,17 @@
 """Endpoints REST do gateway Checkmk (consumidos pelo painel CORVO)."""
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
-from app.checkmk.gateway import CheckmkError, Gateway, load_sites, rdm_downtime
+from app.checkmk.gateway import (
+    CheckmkError,
+    Gateway,
+    agendar_downtime,
+    listar_downtimes,
+    load_sites,
+    rdm_downtime,
+    remover_downtimes,
+)
 
 router = APIRouter(prefix="/checkmk", tags=["Corvo · Checkmk"])
 
@@ -22,6 +30,33 @@ class DowntimeIn(BaseModel):
     minutes: int = Field(gt=0, le=7 * 24 * 60)
     comment: str
     services: list[str] | None = None
+
+
+class DowntimeNovo(BaseModel):
+    """Novo downtime. Sem ``servicos`` → silencia o host inteiro."""
+
+    site: str
+    host_name: str
+    minutes: int = Field(gt=0, le=7 * 24 * 60)
+    comment: str = Field(min_length=1)
+    servicos: list[str] | None = None
+
+
+class DowntimeAlvo(BaseModel):
+    """Item a remover. ``host``/``servico`` vêm da listagem e permitem a
+    remoção alternativa quando o ID sozinho não resolve."""
+
+    site: str
+    id: str
+    host: str | None = None
+    servico: str | None = None
+
+
+class RemocaoIn(BaseModel):
+    alvos: list[DowntimeAlvo] = Field(min_length=1)
+    forcar_por_host: bool = False
+    """Autoriza a remoção por host quando o ID não resolve — apaga TODOS os
+    downtimes do host. Sem isso, o recibo só avisa quantos seriam atingidos."""
 
 
 class RdmPlanItem(BaseModel):
@@ -46,6 +81,56 @@ def _gw(site_id: str) -> Gateway:
 @router.get("/sites")
 def list_sites() -> list[dict]:
     return [{"id": s.id, "url": s.url} for s in load_sites().values()]
+
+
+@router.get("/downtimes")
+def downtimes_federados(
+    site: str | None = None,
+    host: str | None = None,
+    tipo: str = Query("all", pattern="^(all|service|host)$"),
+    servico: str | None = None,
+) -> dict:
+    """Downtimes ativos de todos os sites (ou de um), já normalizados.
+
+    ``tipo=service`` responde a pergunta do plantão: *quais serviços estão
+    silenciados agora*. Sites indisponíveis viram entradas em ``erros`` — a
+    listagem não falha por causa de um site fora.
+    """
+    return listar_downtimes(load_sites(), site_id=site, host_name=host, tipo=tipo, servico=servico)
+
+
+@router.post("/downtimes", status_code=201)
+def criar_downtime(body: DowntimeNovo) -> dict:
+    """Silencia um host inteiro ou serviços específicos dele."""
+    try:
+        return agendar_downtime(
+            load_sites(),
+            body.site,
+            body.host_name,
+            body.minutes,
+            body.comment,
+            body.servicos,
+        )
+    except CheckmkError as exc:
+        raise HTTPException(exc.status or 502, str(exc)) from exc
+
+
+@router.post("/downtimes/remover")
+def remover(body: RemocaoIn) -> dict:
+    """Remove downtimes em lote e confere: ``ok`` reflete o estado real.
+
+    A API do Checkmk responde 204 mesmo quando não remove nada, então cada
+    item é relido depois da remoção. Quando o ID não resolve (site que federa
+    outro core), o recibo vem com ``requer_confirmacao`` e o número de
+    downtimes do mesmo host que a remoção por host levaria junto — reenvie com
+    ``forcar_por_host`` para autorizar.
+    """
+    recibos = remover_downtimes(
+        load_sites(),
+        [a.model_dump() for a in body.alvos],
+        forcar_por_host=body.forcar_por_host,
+    )
+    return {"recibos": recibos, "ok": all(r["ok"] for r in recibos)}
 
 
 @router.post("/{site_id}/hosts", status_code=201)

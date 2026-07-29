@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 import os
+import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -62,6 +63,37 @@ def load_sites(env: str | None = None) -> dict[str, Site]:
     except json.JSONDecodeError as exc:
         raise CheckmkError("registry", f"CITADEL_CHECKMK_SITES inválido: {exc}") from exc
     return {s["id"]: Site(**s) for s in items}
+
+
+PREFIXO_SERVICO = "Downtime for service: "
+PREFIXO_HOST = "Downtime for host: "
+
+
+def normalizar_downtime(site_id: str, item: dict) -> dict:
+    """Achata um downtime da API num registro plano, com o serviço extraído.
+
+    O nome do serviço só existe no ``title``; ``extensions`` traz apenas o
+    ``is_service``. Sem isso o painel não consegue mostrar *qual* serviço está
+    silenciado — que é a pergunta que o operador faz.
+    """
+    ext = item.get("extensions", {})
+    titulo = item.get("title", "")
+    is_service = ext.get("is_service") == "yes"
+    servico = None
+    if is_service and titulo.startswith(PREFIXO_SERVICO):
+        servico = titulo[len(PREFIXO_SERVICO) :]
+    return {
+        "site": site_id,
+        "id": item.get("id"),
+        "host": ext.get("host_name"),
+        "servico": servico,
+        "tipo": "service" if is_service else "host",
+        "autor": ext.get("author"),
+        "comentario": ext.get("comment"),
+        "inicio": ext.get("start_time"),
+        "fim": ext.get("end_time"),
+        "recorrente": ext.get("recurring") == "yes",
+    }
 
 
 class Gateway:
@@ -172,20 +204,250 @@ class Gateway:
             path = "/domain-types/downtime/collections/host"
         return self._req("POST", path, json_body=body)
 
-    def list_downtimes(self, host_name: str | None = None) -> list[dict]:
-        params = {"host_name": host_name} if host_name else None
+    def list_downtimes(
+        self,
+        host_name: str | None = None,
+        tipo: str = "all",
+        servico: str | None = None,
+    ) -> list[dict]:
+        """Downtimes normalizados do site. ``tipo``: all | service | host.
+
+        A API não expõe ``service_description`` como campo próprio: o nome do
+        serviço vem no ``title`` ("Downtime for service: X") e o que distingue
+        host de serviço é ``is_service``. Também não filtra por ``host_name``
+        na querystring (aceita, mas ignora) — daí os filtros irem no ``query``
+        em expressão Livestatus.
+        """
+        exprs: list[dict] = []
+        if host_name:
+            exprs.append({"op": "=", "left": "downtimes.host_name", "right": host_name})
+        if tipo in ("service", "host"):
+            valor = "1" if tipo == "service" else "0"
+            exprs.append({"op": "=", "left": "downtimes.is_service", "right": valor})
+        params = None
+        if exprs:
+            q = exprs[0] if len(exprs) == 1 else {"op": "and", "expr": exprs}
+            params = {"query": json.dumps(q)}
+
         data = self._req("GET", "/domain-types/downtime/collections/all", params=params)
-        return data.get("value", [])
+        itens = [normalizar_downtime(self.site.id, x) for x in data.get("value", [])]
+        if servico:
+            alvo = servico.lower()
+            itens = [i for i in itens if i["servico"] and alvo in i["servico"].lower()]
+        return itens
 
     def delete_downtime(self, downtime_id: str) -> dict:
+        """Remove por ID. Atenção: a API responde 204 mesmo quando não remove
+        (ver ``remover_downtimes``) — sempre confira depois."""
         return self._req(
             "POST",
             "/domain-types/downtime/actions/delete/invoke",
-            json_body={"delete_type": "by_id", "downtime_id": downtime_id},
+            json_body={"delete_type": "by_id", "downtime_id": str(downtime_id)},
         )
+
+    def delete_downtime_por_params(self, host_name: str, services: list[str] | None = None) -> dict:
+        """Remove por host/serviço em vez de ID — alcança downtimes que o
+        ``by_id`` não pega quando o objeto pertence a outro site."""
+        body: dict[str, Any] = {"delete_type": "params", "host_name": host_name}
+        if services:
+            body["service_descriptions"] = services
+        return self._req("POST", "/domain-types/downtime/actions/delete/invoke", json_body=body)
 
     def close(self) -> None:
         self._c.close()
+
+
+def listar_downtimes(
+    sites: dict[str, Site],
+    site_id: str | None = None,
+    host_name: str | None = None,
+    tipo: str = "all",
+    servico: str | None = None,
+    transport: httpx.BaseTransport | None = None,
+) -> dict[str, Any]:
+    """Downtimes de todos os sites (ou de um só), com erro por site isolado.
+
+    Um site fora do ar não derruba a listagem — vira uma entrada em ``erros``,
+    para o painel mostrar o que conseguiu ler e o que faltou.
+    """
+    alvos = {site_id: sites[site_id]} if site_id and site_id in sites else sites
+    if site_id and site_id not in sites:
+        return {"itens": [], "erros": [{"site": site_id, "erro": "site não registrado"}]}
+
+    itens: list[dict] = []
+    erros: list[dict] = []
+    for sid, site in alvos.items():
+        gw = Gateway(site, transport=transport)
+        try:
+            itens.extend(gw.list_downtimes(host_name=host_name, tipo=tipo, servico=servico))
+        except CheckmkError as exc:
+            erros.append({"site": sid, "erro": str(exc)})
+        finally:
+            gw.close()
+    itens.sort(key=lambda i: (i["site"], i["host"] or "", i["servico"] or ""))
+    return {"itens": itens, "erros": erros, "total": len(itens)}
+
+
+def _sobreviveu(gw: Gateway, host: str | None, downtime_id: Any) -> bool:
+    """O downtime ainda está lá depois da tentativa de remoção?
+
+    Sem o host não há como reconferir (a listagem é por host) — nesse caso
+    acredita no 204 da API.
+    """
+    if not host:
+        return False
+    return any(str(i["id"]) == str(downtime_id) for i in gw.list_downtimes(host_name=host))
+
+
+def _sobreviveu_apos_espera(
+    gw: Gateway, host: str | None, downtime_id: Any, tentativas: int, espera: float
+) -> bool:
+    """Igual a ``_sobreviveu``, mas insiste antes de dar o veredito negativo.
+
+    A listagem é eventualmente consistente: um downtime removido pode continuar
+    aparecendo por alguns segundos (mais ainda quando pertence a um site
+    remoto). Só o caminho de FALHA paga essa espera — se já sumiu na primeira
+    leitura, retorna na hora.
+    """
+    for i in range(tentativas):
+        if not _sobreviveu(gw, host, downtime_id):
+            return False
+        if i < tentativas - 1 and espera:
+            time.sleep(espera)
+    return True
+
+
+def remover_downtimes(
+    sites: dict[str, Site],
+    alvos: list[dict],
+    transport: httpx.BaseTransport | None = None,
+    tentativas: int = 3,
+    espera: float = 2.0,
+    forcar_por_host: bool = False,
+) -> list[dict]:
+    """Remove downtimes em lote, CONFERINDO o resultado.
+
+    ``alvos``: [{"site": "tesp3", "id": "1713", "host": "fw01", "servico": "CPU"}]
+
+    Três comportamentos do ambiente moldam esta função — todos verificados
+    contra os sites reais:
+
+    1. ``by_id`` só funciona quando o downtime está no core do site consultado.
+       Num site que federa outros (o ``central`` daqui, cujo core local está
+       vazio), a API responde 204 e não remove nada.
+    2. A remoção por params **ignora** ``service_descriptions`` nesta versão:
+       passar o serviço não remove. Só a remoção por host funciona — e ela
+       apaga TODOS os downtimes daquele host.
+    3. A listagem é eventualmente consistente (segundos de atraso), então uma
+       releitura isolada pode dar falso negativo.
+
+    Por (2), a alternativa não é aplicada sozinha: quando o ``by_id`` não
+    resolve, o recibo explica quantos outros downtimes do mesmo host seriam
+    atingidos e exige ``forcar_por_host`` para prosseguir. Silenciar o alerta
+    de outra pessoa por engano é pior do que falhar de forma explícita.
+    """
+    recibos: list[dict] = []
+    for alvo in alvos:
+        sid, did = alvo.get("site"), alvo.get("id")
+        host = alvo.get("host")
+        if sid not in sites:
+            recibos.append({"site": sid, "id": did, "ok": False, "erro": "site não registrado"})
+            continue
+
+        gw = Gateway(sites[sid], transport=transport)
+        try:
+            erro_api: str | None = None
+            try:
+                gw.delete_downtime(str(did))
+            except CheckmkError as exc:
+                erro_api = str(exc)
+
+            # paciência aqui também: logo após o delete a listagem ainda pode
+            # mostrar o item por alguns segundos e mandaria o fluxo para a
+            # remoção por host sem necessidade
+            if not _sobreviveu_apos_espera(gw, host, did, tentativas, espera):
+                recibos.append({"site": sid, "id": did, "ok": True, "via": "by_id"})
+                continue
+            if not host:
+                recibos.append(
+                    {"site": sid, "id": did, "ok": False, "erro": erro_api or "ainda presente"}
+                )
+                continue
+
+            outros = [i for i in gw.list_downtimes(host_name=host) if str(i["id"]) != str(did)]
+            if not forcar_por_host:
+                recibos.append(
+                    {
+                        "site": sid,
+                        "id": did,
+                        "ok": False,
+                        "requer_confirmacao": True,
+                        "colaterais": len(outros),
+                        "erro": (
+                            f"não sai por ID neste site (downtime federado de outro core). "
+                            f"A remoção que funciona aqui é por host e apagaria também "
+                            f"{len(outros)} outro(s) downtime(s) de '{host}' — reenvie com "
+                            f"forcar_por_host=true para confirmar."
+                        ),
+                    }
+                )
+                continue
+
+            try:
+                gw.delete_downtime_por_params(host)  # sem serviços: só assim remove
+            except CheckmkError as exc:
+                erro_api = str(exc)
+
+            if _sobreviveu_apos_espera(gw, host, did, tentativas, espera):
+                recibos.append(
+                    {
+                        "site": sid,
+                        "id": did,
+                        "ok": False,
+                        "erro": erro_api or "não removido nem por host — verificar pela GUI",
+                    }
+                )
+            else:
+                recibos.append(
+                    {
+                        "site": sid,
+                        "id": did,
+                        "ok": True,
+                        "via": "por_host",
+                        "colaterais": [i["id"] for i in outros],
+                    }
+                )
+        except CheckmkError as exc:
+            recibos.append({"site": sid, "id": did, "ok": False, "erro": str(exc)})
+        finally:
+            gw.close()
+    return recibos
+
+
+def agendar_downtime(
+    sites: dict[str, Site],
+    site_id: str,
+    host_name: str,
+    minutes: int,
+    comment: str,
+    services: list[str] | None = None,
+    transport: httpx.BaseTransport | None = None,
+) -> dict:
+    """Agenda downtime de host (services=None) ou de serviços num site."""
+    if site_id not in sites:
+        raise CheckmkError(site_id, "site não registrado")
+    gw = Gateway(sites[site_id], transport=transport)
+    try:
+        gw.schedule_downtime(host_name, minutes, comment, services)
+        return {
+            "ok": True,
+            "site": site_id,
+            "host": host_name,
+            "servicos": services,
+            "minutos": minutes,
+        }
+    finally:
+        gw.close()
 
 
 def rdm_downtime(

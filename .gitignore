@@ -18,3 +18,5 @@ sites.yml
 # artefatos
 data/
 *.log
+# coletas com dados de ambiente (gerados por scripts/)
+relatorios/
