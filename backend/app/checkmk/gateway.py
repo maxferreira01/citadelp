@@ -121,7 +121,7 @@ class Gateway:
         path: str,
         *,
         json_body: dict | None = None,
-        params: dict | None = None,
+        params: dict | list[tuple[str, str]] | None = None,
         headers: dict | None = None,
     ) -> dict[str, Any]:
         try:
@@ -170,6 +170,82 @@ class Gateway:
             json_body={"redirect": False, "sites": [], "force_foreign_changes": force_foreign},
             headers={"If-Match": "*"},
         )
+
+    # ------------------------------------------------- versão / hosts / regras
+    def get_version(self) -> dict:
+        """Versão/edição do site. 404 aqui = site sem REST API (Checkmk 1.5)."""
+        return self._req("GET", "/version")
+
+    def list_hosts(self) -> list[dict]:
+        """Hosts configurados no site: [{"id": ..., "folder": ...}]."""
+        data = self._req(
+            "GET",
+            "/domain-types/host_config/collections/all",
+            params={"include_links": "false"},
+        )
+        return [
+            {"id": h.get("id"), "folder": h.get("extensions", {}).get("folder", "")}
+            for h in data.get("value", [])
+        ]
+
+    def get_ruleset(self, name: str) -> dict:
+        """Metadados de um ruleset — sonda se ele existe nesta versão do site."""
+        return self._req("GET", f"/objects/ruleset/{name.replace(':', '%3A')}")
+
+    def list_rules(self, ruleset: str) -> list[dict]:
+        data = self._req(
+            "GET",
+            "/domain-types/rule/collections/all",
+            params={"ruleset_name": ruleset},
+        )
+        out = []
+        for r in data.get("value", []):
+            ext = r.get("extensions", {})
+            out.append(
+                {
+                    "id": r.get("id"),
+                    "ruleset": ext.get("ruleset"),
+                    "folder": ext.get("folder"),
+                    "properties": ext.get("properties", {}),
+                    "value_raw": ext.get("value_raw"),
+                    "conditions": ext.get("conditions", {}),
+                }
+            )
+        return out
+
+    def create_rule(
+        self,
+        ruleset: str,
+        value_raw: str,
+        conditions: dict,
+        description: str,
+        comment: str = "",
+        folder: str = "~",
+    ) -> dict:
+        return self._req(
+            "POST",
+            "/domain-types/rule/collections/all",
+            json_body={
+                "ruleset": ruleset,
+                "folder": folder,
+                "properties": {"disabled": False, "description": description, "comment": comment},
+                "value_raw": value_raw,
+                "conditions": conditions,
+            },
+        )
+
+    def delete_rule(self, rule_id: str) -> dict:
+        return self._req("DELETE", f"/objects/rule/{rule_id}", headers={"If-Match": "*"})
+
+    def list_services_monitorados(self, host_name: str, columns: list[str]) -> list[dict]:
+        """Serviços do host no CORE (endpoint de monitoração, não de config).
+
+        Serve dois momentos: pré-apply (o serviço "Interface X" existe mesmo?)
+        e pós-apply (notifications_enabled ficou 0 nos alvos e 1 nos uplinks?).
+        """
+        params = [("columns", c) for c in columns]
+        data = self._req("GET", f"/objects/host/{host_name}/collections/services", params=params)
+        return [x.get("extensions", {}) for x in data.get("value", [])]
 
     # -------------------------------------------------------------- downtimes
     def schedule_downtime(

@@ -3,6 +3,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.aci.router import router as aci_router
 from app.auth.router import router as auth_router
 from app.checkmk.router import router as checkmk_router
 from app.corvo.router import router as corvo_router
@@ -22,6 +23,7 @@ app.add_middleware(
 app.include_router(auth_router)
 app.include_router(corvo_router)
 app.include_router(checkmk_router)
+app.include_router(aci_router)
 
 
 @app.get("/healthz", tags=["infra"])
