@@ -156,6 +156,10 @@ def aplicar_plano(gw: Gateway, plano: PlanoSite) -> dict:
             comment="gerada por scripts/aci_silenciar.py — não editar; regenerar pelo citadelp",
         )
         criadas.append(resp.get("id"))
+        # topo da pasta: em ruleset first-match, regra genérica anterior
+        # (ex.: '1' global sem condições) anularia o silenciamento inteiro
+        if resp.get("id"):
+            gw.move_rule(resp["id"])
     gw.activate(force_foreign=False)
     recibo.update({"ok": True, "removidas": removidas, "criadas": criadas})
     return recibo

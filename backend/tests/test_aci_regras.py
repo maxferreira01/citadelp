@@ -100,6 +100,11 @@ def test_aplicar_e_idempotente_remove_antigas_cria_novas_e_ativa():
                 "Interface Ethernet1/1$"
             ]
             return httpx.Response(200, json={"id": "nova-1"})
+        if req.method == "POST" and "/actions/move/invoke" in path:
+            corpo = json.loads(req.content)
+            eventos.append(f"move:{path.split('/')[-4]}")
+            assert corpo == {"position": "top_of_folder", "folder": "~"}
+            return httpx.Response(200, json={})
         if "activate-changes" in path:
             eventos.append("activate")
             return httpx.Response(200, json={})
@@ -108,8 +113,9 @@ def test_aplicar_e_idempotente_remove_antigas_cria_novas_e_ativa():
     plano = montar_plano("TESP6", "tesp6", {"LEAF1001TESP6": ["eth1/1"]}, "20260824")
     gw = Gateway(SITE, transport=httpx.MockTransport(handler))
     recibo = aplicar_plano(gw, plano)
-    # remove SÓ as antigas do mesmo fabric, cria as novas, ativa — nessa ordem
-    assert eventos == ["list", "delete:velha-1", "create", "activate"]
+    # remove SÓ as antigas do mesmo fabric, cria, move ao TOPO (regra genérica
+    # anterior não pode anular o silenciamento), ativa — nessa ordem
+    assert eventos == ["list", "delete:velha-1", "create", "move:nova-1", "activate"]
     assert recibo["ok"] and recibo["removidas"] == ["velha-1"] and recibo["criadas"] == ["nova-1"]
 
 

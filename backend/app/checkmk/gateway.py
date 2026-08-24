@@ -241,6 +241,16 @@ class Gateway:
             },
         )
 
+    def move_rule(self, rule_id: str, folder: str = "~") -> dict:
+        """Move a regra para o TOPO da pasta. Rulesets first-match (como
+        extra_service_conf) são anulados por regras genéricas que venham
+        antes — caso real: regra global '1' sem condições no tesp4."""
+        return self._req(
+            "POST",
+            f"/objects/rule/{rule_id}/actions/move/invoke",
+            json_body={"position": "top_of_folder", "folder": folder},
+        )
+
     def delete_rule(self, rule_id: str) -> dict:
         return self._req("DELETE", f"/objects/rule/{rule_id}", headers={"If-Match": "*"})
 
