@@ -178,11 +178,18 @@ class Gateway:
 
     def list_hosts(self) -> list[dict]:
         """Hosts configurados no site: [{"id": ..., "folder": ...}]."""
-        data = self._req(
-            "GET",
-            "/domain-types/host_config/collections/all",
-            params={"include_links": "false"},
-        )
+        try:
+            data = self._req(
+                "GET",
+                "/domain-types/host_config/collections/all",
+                params={"include_links": "false"},
+            )
+        except CheckmkError as exc:
+            # Sites 2.1 e anteriores não conhecem include_links (400 Unknown
+            # field) — repete sem o parâmetro; a resposta só vem maior.
+            if exc.status != 400 or "include_links" not in str(exc):
+                raise
+            data = self._req("GET", "/domain-types/host_config/collections/all")
         return [
             {"id": h.get("id"), "folder": h.get("extensions", {}).get("folder", "")}
             for h in data.get("value", [])

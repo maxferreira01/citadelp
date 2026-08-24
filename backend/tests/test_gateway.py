@@ -70,6 +70,29 @@ def test_rdm_downtime_nao_para_no_erro():
     assert receipts[1]["ok"] is False and "não registrado" in receipts[1]["error"]
 
 
+def test_list_hosts_reenvia_sem_include_links_em_site_21():
+    # Sites 2.1 respondem 400 "Unknown field" ao include_links; o gateway
+    # deve repetir a listagem sem o parâmetro em vez de propagar o erro.
+    reqs = []
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        reqs.append(req)
+        if "include_links" in str(req.url):
+            return httpx.Response(
+                400,
+                json={"fields": {"include_links": ["Unknown field."]}},
+            )
+        return httpx.Response(
+            200,
+            json={"value": [{"id": "LEAF1001TESP2", "extensions": {"folder": "/redes"}}]},
+        )
+
+    gw = Gateway(SITE, transport=httpx.MockTransport(handler))
+    hosts = gw.list_hosts()
+    assert len(reqs) == 2 and "include_links" not in str(reqs[1].url)
+    assert hosts == [{"id": "LEAF1001TESP2", "folder": "/redes"}]
+
+
 def test_load_sites_do_json():
     sites = load_sites('[{"id":"a","url":"https://x/a","user":"u","secret":"p"}]')
     assert sites["a"].user == "u"
