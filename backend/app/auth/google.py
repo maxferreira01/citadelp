@@ -57,7 +57,11 @@ def verify_google_token(token: str) -> dict:
         info = google_id_token.verify_oauth2_token(token, google_requests.Request(), cid)
     except ValueError as exc:
         raise AuthError(f"ID token inválido: {exc}") from exc
-    return {"email": info["email"], "name": info.get("name", ""), "picture": info.get("picture", "")}
+    return {
+        "email": info["email"],
+        "name": info.get("name", ""),
+        "picture": info.get("picture", ""),
+    }
 
 
 def _sign(payload: bytes) -> str:
