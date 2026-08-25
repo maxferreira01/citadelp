@@ -136,14 +136,6 @@ const ACTIONS = [
 ];
 
 /* TRÊS OLHOS / MURALHA / DOMÍNIOS / TESOURO / ARQUIVO — EST · mock.          */
-const CAPACITY = [
-  // "nsxt1" (NSX T1 Gateways) não é mais mock: vem de /nsx/t1/* — ver useNsxT1().
-  { id: "ipset", name: "NSX IP Set · TESP02", usage: 8106, op: 9200, tech: 9600, days: 132, conf: "91%", st: "warn", hist: [6100, 6400, 6700, 7000, 7280, 7520, 7740, 7940, 8106], proj: [8106, 8420, 8760, 9110] },
-  { id: "lsp", name: "Logical Switch Ports · TESP02", usage: 20626, op: 24500, tech: 26000, days: 156, conf: "88%", st: "warn", hist: [15300, 16000, 16800, 17500, 18200, 18900, 19500, 20100, 20626], proj: [20626, 21400, 22250, 23150] },
-  { id: "nat", name: "NSX NAT Rules · TESP03", usage: 17097, op: 25000, tech: 30000, days: 310, conf: "79%", st: "ok", hist: [11800, 12400, 13000, 13600, 14300, 14900, 15600, 16350, 17097], proj: [17097, 17800, 18540, 19300] },
-  { id: "fw", name: "FW físico — memória · TESP04", usage: 69.5, op: 85, tech: 100, days: null, conf: "—", st: "stale", hist: [58, 61, 66, 63, 70, 65, 72, 68, 69.5], proj: [69.5, 71, 72.5, 74] },
-  { id: "aci", name: "ACI MAC_PER_IP · TESP02", usage: 0, op: 9200, tech: 10000, days: null, conf: "—", st: "nocollect", hist: [], proj: [] },
-];
 const LIMITS = [
   // NSX-T · Tier-1 Routers: linhas reais por site via /nsx/t1/resumo (Muralha).
   { plat: "NSX-T", res: "NAT Rules", edge: "TESP03", use: 17097, op: 25000, vendor: 30000, src: "config-max VMware" },
@@ -402,25 +394,6 @@ function Trajectory({ hist, proj, op, tech, h = 150 }) {
     </svg>
   );
 }
-function Runway({ name, usage, op, tech, days, conf, st, sel, onClick }) {
-  const pct = st === "nocollect" ? 0 : Math.min(100, (usage / tech) * 100);
-  const opPct = (op / tech) * 100;
-  return (
-    <div onClick={onClick} style={{ cursor: "pointer", padding: "7px 10px", margin: "0 -10px", borderRadius: 6, background: sel ? "var(--selection)" : "transparent", boxShadow: sel ? "inset 2px 0 var(--action)" : "none" }}>
-      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12.5, marginBottom: 5 }}>
-        <span style={{ fontWeight: sel ? 600 : 400 }}>{name}</span>
-        <span style={{ display: "inline-flex", gap: 10, alignItems: "baseline" }}>
-          <St st={st} label={st === "nocollect" ? "sem coleta 26 h" : st === "stale" ? "instável" : days != null ? `${days} dias` : "sem tendência"} />
-          {conf !== "—" && <span className="num" style={{ fontSize: 10.5, color: "var(--text-faint)" }}>{conf}</span>}
-        </span>
-      </div>
-      <div style={{ position: "relative", height: 9, background: "var(--surface-sunken)", borderRadius: 4, border: st === "nocollect" ? "1px dotted var(--state-nocollect)" : "none" }}>
-        {st !== "nocollect" && <div style={{ position: "absolute", inset: "0 auto 0 0", width: pct + "%", background: "var(--action)", borderRadius: 4, opacity: .9 }} />}
-        <div style={{ position: "absolute", top: -2, bottom: -2, left: opPct + "%", width: 2, background: "var(--cap-limit-op)" }} />
-      </div>
-    </div>
-  );
-}
 
 /* ====================== LOGIN GOOGLE (GIS + backend) ====================== */
 function GoogleSignIn({ onUser }) {
@@ -603,12 +576,10 @@ function Conselho({ go }) {
 }
 
 function TresOlhos() {
-  const [sel, setSel] = useState("nsxt1");
   const [site, setSite] = useState("");
   const nsx = useNsxT1(site);
-  const lista = nsx.data ? [nsx.data, ...CAPACITY] : CAPACITY;
-  const r = lista.find((x) => x.id === sel) || lista[0];
   const n = nsx.data;
+  const r = n || { id: "nsxt1", name: "NSX T1 Gateways", hist: [], proj: [], op: 3200, tech: 4000, days: null, conf: "—" };
   const alerta = n && n.days != null && n.days <= 180;
   return (
     <div style={{ display: "grid", gap: 14 }}>
@@ -629,19 +600,13 @@ function TresOlhos() {
         )}
         <Chip m="OBS" s="nsx-collector → InfluxDB" />
       </div>
-      <Card mock={r.id !== "nsxt1"}>
+      <Card mock={!n}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 8 }}>
           <span style={{ font: "600 14px var(--font-ui)", color: "var(--petrol-900)" }}>{r.name}</span>
           {r.days != null && <span className="num" style={{ font: "700 14px var(--font-mono)", color: "var(--cap-limit-op)" }}>{r.days} dias · {r.conf}</span>}
         </div>
         <Trajectory hist={r.hist} proj={r.proj} op={r.op} tech={r.tech} h={170} />
-        {r.id === "nsxt1" && <div style={{ marginTop: 6, display: "flex", gap: 8, flexWrap: "wrap" }}><Chip m="OBS" s="histórico diário · nsx_t1_totals" /><Chip m="CALC" s="projeção linear 90 d" /><Chip m="MAN" s={`limite op = ${Math.round(NSX_T1_OP_FRAC * 100)} % do config-max`} /></div>}
-      </Card>
-      <Card mock={!n}>
-        <Cap style={{ marginBottom: 10 }}>runways por recurso</Cap>
-        <div style={{ display: "grid", gap: 4 }}>
-          {lista.map((x) => <Runway key={x.id} {...x} name={x.name} sel={sel === x.id} onClick={() => setSel(x.id)} />)}
-        </div>
+        {n && <div style={{ marginTop: 6, display: "flex", gap: 8, flexWrap: "wrap" }}><Chip m="OBS" s="histórico diário · nsx_t1_totals" /><Chip m="CALC" s="projeção linear 90 d" /><Chip m="MAN" s={`limite op = ${Math.round(NSX_T1_OP_FRAC * 100)} % do config-max`} /></div>}
       </Card>
       {n && (
         <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) minmax(0,1fr)", gap: 14 }}>
