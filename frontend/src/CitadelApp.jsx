@@ -295,8 +295,8 @@ async function api(path, opts = {}) {
 }
 
 /* NSX T1 — OBS · nsx-collector → InfluxDB (read-model /nsx/t1/*).            */
-/* Limite operacional = 80 % do config-max do NSX (premissa MAN, editável).     */
-const NSX_T1_OP_FRAC = 0.8;
+/* Limite operacional de T1: 2.000 por datacenter (premissa MAN de arquitetura). */
+const NSX_T1_OP_LIMIT = 2000;
 /* Regressão linear sobre o histórico diário → projeção (CALC) em 3 passos de 30 d. */
 function projetar(hist, op) {
   const n = hist.length;
@@ -332,7 +332,7 @@ function useNsxT1(site) {
         ]);
         if (!vivo) return;
         const serie = hist.map((h) => h.total).filter((v) => v != null);
-        const tech = alvo.nsx_max || 4000, op = Math.round(tech * NSX_T1_OP_FRAC);
+        const tech = alvo.nsx_max || 4000, op = NSX_T1_OP_LIMIT;
         const usage = alvo.total ?? alvo.nsx_current ?? 0;
         const { proj, days, conf } = projetar(serie, op);
         const st = usage >= op ? "crit" : usage >= op * 0.85 ? "warn" : "ok";
@@ -590,7 +590,7 @@ function TresOlhos() {
             : !n ? <div style={{ fontSize: 13.5, fontWeight: 600 }}>{nsx.busy ? "carregando capacity de T1…" : "◌ sem coleta de T1"}</div>
             : <>
               <div style={{ fontSize: 13.5, fontWeight: 600 }}>{n.days != null ? `NSX T1 pode atingir o limite operacional em ${n.days} dias.` : "NSX T1 sem tendência de esgotamento no horizonte projetado."}</div>
-              <div style={{ fontSize: 11.5, color: "var(--text-muted)", marginTop: 2 }}>{n.site} · {fmt(n.usage)} de {fmt(n.op)} T1 (config-max {fmt(n.tech)}) · projeção 90 d, confiança {n.conf}</div>
+              <div style={{ fontSize: 11.5, color: "var(--text-muted)", marginTop: 2 }}>{n.site} · {fmt(n.usage)} de {fmt(n.op)} T1 (limite 2k/DC · config-max {fmt(n.tech)}) · projeção 90 d, confiança {n.conf}</div>
             </>}
         </div>
         {nsx.sites.length > 1 && (
@@ -606,7 +606,7 @@ function TresOlhos() {
           {r.days != null && <span className="num" style={{ font: "700 14px var(--font-mono)", color: "var(--cap-limit-op)" }}>{r.days} dias · {r.conf}</span>}
         </div>
         <Trajectory hist={r.hist} proj={r.proj} op={r.op} tech={r.tech} h={170} />
-        {n && <div style={{ marginTop: 6, display: "flex", gap: 8, flexWrap: "wrap" }}><Chip m="OBS" s="histórico diário · nsx_t1_totals" /><Chip m="CALC" s="projeção linear 90 d" /><Chip m="MAN" s={`limite op = ${Math.round(NSX_T1_OP_FRAC * 100)} % do config-max`} /></div>}
+        {n && <div style={{ marginTop: 6, display: "flex", gap: 8, flexWrap: "wrap" }}><Chip m="OBS" s="histórico diário · nsx_t1_totals" /><Chip m="CALC" s="projeção linear 90 d" /><Chip m="MAN" s="limite op = 2.000 T1 por datacenter" /></div>}
       </Card>
       {n && (
         <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) minmax(0,1fr)", gap: 14 }}>
@@ -697,7 +697,7 @@ function Muralha() {
   const [nsx, setNsx] = useState([]);
   const [err, setErr] = useState("");
   React.useEffect(() => { api("/nsx/t1/resumo").then(setNsx).catch((e) => setErr(String(e.message || e))); }, []);
-  const linhasNsx = nsx.map((r) => ({ plat: "NSX-T", res: "Tier-1 Routers", edge: r.site, use: r.total ?? r.nsx_current ?? 0, op: Math.round((r.nsx_max || 4000) * NSX_T1_OP_FRAC), vendor: r.nsx_max || 4000, src: "OBS · capacity NSX · op = 80 % (premissa)" }));
+  const linhasNsx = nsx.map((r) => ({ plat: "NSX-T", res: "Tier-1 Routers", edge: r.site, use: r.total ?? r.nsx_current ?? 0, op: NSX_T1_OP_LIMIT, vendor: r.nsx_max || 4000, src: "premissa arquitetura · 2k/DC" }));
   const linhas = [...linhasNsx, ...LIMITS];
   return (
     <Card mock style={{ padding: 0, overflow: "hidden" }}>
