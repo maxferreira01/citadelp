@@ -10,6 +10,7 @@ Uso: python scripts/nsx_t1capacity.py --site TESP6          # um site
      python scripts/nsx_t1capacity.py --site todos --probe  # só testa acesso
      python scripts/nsx_t1capacity.py --site TESP6 --validar   # Manager × Influx (GET)
      python scripts/nsx_t1capacity.py --site TESP6 --com-edge  # + T1 por edge cluster
+     python scripts/nsx_t1capacity.py --site TESP7 --criacao   # creation time de cada T1 (edge produtivo)
 
 --validar refaz o cross-check: result_count da Manager × nsx_t1_totals.total ×
 soma per_t0+per_vrf × capacity dashboard. Exit code = nº de sites divergentes
@@ -31,7 +32,7 @@ from pathlib import Path
 RAIZ = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(RAIZ / "backend"))
 
-from app.nsx.artefatos import gravar_snapshot
+from app.nsx.artefatos import gravar_criacao, gravar_snapshot
 from app.nsx.client import InfluxClient, NsxError
 from app.nsx.config import (
     Manager,
@@ -206,6 +207,11 @@ def main() -> int:
     ap.add_argument(
         "--com-edge", action="store_true", help="agrega T1 por edge cluster via Manager"
     )
+    ap.add_argument(
+        "--criacao",
+        action="store_true",
+        help="grava snapshot com o _create_time de todos os T1 (Manager, GET) — edge produtivo",
+    )
     args = ap.parse_args()
 
     carregar_env()
@@ -251,6 +257,23 @@ def main() -> int:
                     if not validacao["ok"]:
                         falhas += 1
             falhas += snapshot(q, site, args.com_edge, mgr, validacao)
+            if args.criacao:
+                if mgr is None:
+                    print(
+                        f"[{site}] --criacao exige o site em CITADEL_NSX_MANAGERS",
+                        file=sys.stderr,
+                    )
+                    falhas += 1
+                else:
+                    c = ManagerClient(mgr, timeout=120.0)
+                    try:
+                        itens = c.tier1_criacao()
+                    finally:
+                        c.close()
+                    caminho = gravar_criacao(site, itens)
+                    print(
+                        f"  criação: {len(itens)} T1 com _create_time → {caminho.relative_to(RAIZ)}"
+                    )
         except (NsxError, ManagerError, NsxConfigError) as exc:
             print(f"[{site}] {exc}", file=sys.stderr)
             falhas += 1

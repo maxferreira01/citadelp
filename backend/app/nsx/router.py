@@ -20,7 +20,7 @@ from fastapi.responses import PlainTextResponse
 from .artefatos import ultimo_snapshot
 from .client import InfluxClient, NsxError
 from .config import NsxConfigError, load_aliases, load_influx
-from .consultas import Consultas
+from .consultas import Consultas, crescimento_por_criacao
 
 router = APIRouter(prefix="/nsx", tags=["nsx"])
 
@@ -114,6 +114,7 @@ def tabela(
             "Ano",
             "Qtd-vrf",
             "Qtd-node",
+            "Total-edge",
         ]
     )
     for r in linhas:
@@ -129,6 +130,24 @@ def tabela(
                 r["ano"],
                 r["qtd"],
                 r["qtd_node"],
+                r["total_edge"],
             ]
         )
     return PlainTextResponse(buf.getvalue(), media_type="text/csv; charset=utf-8")
+
+
+@router.get("/t1/crescimento")
+def crescimento(site: str) -> dict:
+    """Crescimento mês a mês pelo creation time da Manager (snapshot do CLI
+    ``--criacao``), complementado pelos ``deleted`` do collector. Só faz sentido
+    para o edge produtivo; os demais sites usam /historico (Influx)."""
+    q = _consultas()
+    s_ = _site(site)
+    out = _run(lambda: crescimento_por_criacao(s_, q.eventos(s_, dias=365)))
+    if out is None:
+        raise HTTPException(
+            404,
+            f"sem snapshot de criação para '{s_}' — "
+            f"rode scripts/nsx_t1capacity.py --site {s_} --criacao",
+        )
+    return out

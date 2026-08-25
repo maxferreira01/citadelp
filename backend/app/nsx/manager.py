@@ -11,6 +11,7 @@ Não há e não deve haver método de escrita aqui.
 from __future__ import annotations
 
 from collections import Counter
+from datetime import UTC
 from typing import Any
 
 import httpx
@@ -94,6 +95,26 @@ class ManagerClient:
 
     def tier1s(self) -> list[dict[str, Any]]:
         return self.paginado("/policy/api/v1/infra/tier-1s")
+
+    def tier1_criacao(self) -> list[dict[str, Any]]:
+        """Um item por T1 com o ``_create_time`` da API (epoch ms → ISO UTC).
+        É a única fonte do "quando nasceu" anterior à retenção do Influx."""
+        from datetime import datetime
+
+        out = []
+        for t in self.tier1s():
+            ms = t.get("_create_time")
+            out.append(
+                {
+                    "id": t.get("id"),
+                    "name": t.get("display_name", t.get("id")),
+                    "create_time": datetime.fromtimestamp(ms / 1000, tz=UTC).isoformat()
+                    if ms
+                    else None,
+                    "created_by": t.get("_create_user"),
+                }
+            )
+        return sorted(out, key=lambda x: x["create_time"] or "")
 
     def por_edge_cluster(self) -> list[T1PorEdge]:
         """Join logical-routers(TIER1) → edge_cluster_id → nome do cluster."""

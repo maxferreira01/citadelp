@@ -165,3 +165,29 @@ def ultimo_snapshot(site: str, base: Path | None = None) -> Path | None:
         return None
     arquivos = sorted(destino.glob("t1capacity-*.json"))
     return arquivos[-1] if arquivos else None
+
+
+def gravar_criacao(
+    site: str, itens: list[dict], base: Path | None = None, quando: datetime | None = None
+) -> Path:
+    """``criacao-<ts>.json``: todos os T1 do site com ``_create_time`` (Manager, GET).
+    Cada execução é um snapshot novo — a diferença entre dois snapshots revela
+    remoções que a API já não mostra."""
+    agora = quando or datetime.now(BRT)
+    destino = (base or RAIZ_REPO / "relatorios" / "nsx-t1capacity") / site
+    destino.mkdir(parents=True, exist_ok=True)
+    caminho = destino / f"criacao-{agora.strftime('%Y%m%d-%H%M')}.json"
+    caminho.write_text(
+        json.dumps(
+            {"site": site, "gerado_em": agora.isoformat(), "total": len(itens), "t1s": itens},
+            ensure_ascii=False,
+            indent=1,
+        ),
+        encoding="utf-8",
+    )
+    return caminho
+
+
+def snapshots_criacao(site: str, base: Path | None = None) -> list[Path]:
+    destino = (base or RAIZ_REPO / "relatorios" / "nsx-t1capacity") / site
+    return sorted(destino.glob("criacao-*.json")) if destino.is_dir() else []

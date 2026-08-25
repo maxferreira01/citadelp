@@ -748,9 +748,9 @@ function TabelaT1({ site }) {
     setRows(null); setErr("");
     api("/nsx/t1/tabela" + (todos ? "" : `?site=${encodeURIComponent(site)}`)).then(setRows).catch((e) => setErr(String(e.message || e)));
   }, [site, todos]);
-  const cols = ["Edge", "Node", "Limite-node", "vrf-number", "limite-vrf", "Dia", "Mes", "Ano", "Qtd-vrf"];
+  const cols = ["Edge", "Node", "Limite-node", "vrf-number", "limite-vrf", "Dia", "Mes", "Ano", "Qtd-vrf", "Total"];
   const csv = () => {
-    const linhas = [cols.join(";"), ...(rows || []).map((r) => [r.edge, r.node, r.limite_node ?? "", r.vrf, r.limite_vrf ?? "", r.dia, r.mes, r.ano, r.qtd].join(";"))].join("\n");
+    const linhas = [cols.join(";"), ...(rows || []).map((r) => [r.edge, r.node, r.limite_node ?? "", r.vrf, r.limite_vrf ?? "", r.dia, r.mes, r.ano, r.qtd, r.total_edge ?? ""].join(";"))].join("\n");
     navigator.clipboard?.writeText(linhas);
   };
   return (
@@ -784,6 +784,7 @@ function TabelaT1({ site }) {
                 <td className="num" style={{ padding: "6px 14px", textAlign: "right" }}>{r.mes}</td>
                 <td className="num" style={{ padding: "6px 14px", textAlign: "right" }}>{r.ano}</td>
                 <td className="num" style={{ padding: "6px 14px", textAlign: "right" }}><St st={st} label={String(r.qtd)} /></td>
+                <td className="num" style={{ padding: "6px 14px", textAlign: "right", fontWeight: 600 }}>{r.total_edge != null ? fmt(r.total_edge) : "—"}</td>
               </tr>);
           })}</tbody>
         </table>

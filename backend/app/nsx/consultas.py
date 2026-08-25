@@ -16,6 +16,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from .artefatos import snapshots_criacao
 from .client import InfluxClient
 from .config import Aliases
 from .modelos import EventoT1, PontoHistorico, ResumoSite, T1PorT0, T1PorVrf
@@ -237,9 +238,11 @@ class Consultas:
         """Linhas no formato da planilha de capacity (uma por VRF, mais uma por T0
         com os T1 diretos): Edge · Node · Limite-node · vrf-number · limite-vrf ·
         Dia · Mes · Ano · Qtd-vrf."""
-        sites = [site] if site else [r.site for r in self.resumo()]
+        resumos = {r.site: r for r in self.resumo(site)}
+        sites = [site] if site else sorted(resumos)
         out: list[dict] = []
         for s_ in sites:
+            total_edge = resumos[s_].total if s_ in resumos else None
             for t in self.por_t0(s_):
                 dia, mes, ano = _dma(t.atualizado_em)
                 out.append(
@@ -254,6 +257,7 @@ class Consultas:
                         "ano": ano,
                         "qtd": t.t1_direct,
                         "qtd_node": t.t1_count,
+                        "total_edge": total_edge,
                     }
                 )
                 for v in self.por_vrf(s_):
@@ -272,6 +276,7 @@ class Consultas:
                             "ano": ano,
                             "qtd": v.t1_count,
                             "qtd_node": t.t1_count,
+                            "total_edge": total_edge,
                         }
                     )
             for v in self.por_vrf(s_):
@@ -290,6 +295,7 @@ class Consultas:
                         "ano": ano,
                         "qtd": v.t1_count,
                         "qtd_node": None,
+                        "total_edge": total_edge,
                     }
                 )
         return out
@@ -299,3 +305,57 @@ def _dma(iso: str | None) -> tuple[int | None, int | None, int | None]:
     if not iso or len(iso) < 10:
         return None, None, None
     return int(iso[8:10]), int(iso[5:7]), int(iso[0:4])
+
+
+def crescimento_por_criacao(site: str, eventos: list[EventoT1] | None = None) -> dict | None:
+    """Criados por mês pelo ``_create_time`` (snapshot mais recente da Manager) +
+    removidos por mês (eventos do collector, só dentro da retenção) + os T1 que
+    sumiram entre o snapshot anterior e o atual (remoções inferidas)."""
+    import json as _json
+    from collections import Counter
+
+    snaps = snapshots_criacao(site)
+    if not snaps:
+        return None
+    atual = _json.loads(snaps[-1].read_text(encoding="utf-8"))
+    criados: Counter[str] = Counter()
+    for t in atual["t1s"]:
+        if t.get("create_time"):
+            criados[t["create_time"][:7]] += 1
+    removidos_ev: Counter[str] = Counter()
+    for e in eventos or []:
+        if e.event == "deleted":
+            removidos_ev[e.quando[:7]] += 1
+    sumiram: list[dict] = []
+    if len(snaps) >= 2:
+        anterior = _json.loads(snaps[-2].read_text(encoding="utf-8"))
+        ids_atual = {t["id"] for t in atual["t1s"]}
+        sumiram = [t for t in anterior["t1s"] if t["id"] not in ids_atual]
+    meses = sorted(set(criados) | set(removidos_ev))
+    acumulado, linhas = 0, []
+    for m in meses:
+        acumulado += criados[m]
+        linhas.append(
+            {
+                "mes": m,
+                "criados": criados[m],
+                "removidos": removidos_ev.get(m, 0),
+                "acumulado_criados": acumulado,
+            }
+        )
+    # média dos últimos 3 meses fechados (o mês corrente entra parcial, fica de fora)
+    corrente = atual["gerado_em"][:7]
+    fechados = [x for x in linhas if x["mes"] < corrente][-3:]
+    media3 = round(sum(x["criados"] for x in fechados) / len(fechados), 1) if fechados else None
+    return {
+        "site": site,
+        "snapshot": atual["gerado_em"],
+        "snapshots": len(snaps),
+        "total_t1": atual["total"],
+        "primeiro_t1": atual["t1s"][0]["create_time"] if atual["t1s"] else None,
+        "media_criados_3m": media3,
+        "meses_fechados_na_media": [x["mes"] for x in fechados],
+        "sumiram_desde_snapshot_anterior": len(sumiram),
+        "sumiram": [{"name": t["name"], "create_time": t["create_time"]} for t in sumiram[:50]],
+        "por_mes": linhas,
+    }
