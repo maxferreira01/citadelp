@@ -358,7 +358,7 @@ function T1Bars({ rows, nameKey, title, semLimite }) {
               <CartesianGrid horizontal={false} stroke="var(--hairline)" />
               <XAxis type="number" allowDecimals={false} tick={{ fontSize: 10.5, fontFamily: "var(--font-mono)" }} stroke="var(--text-faint)" />
               <YAxis type="category" dataKey="k" width={170} tick={{ fontSize: 10.5, fontFamily: "var(--font-mono)" }} stroke="var(--text-faint)" />
-              <Tooltip cursor={{ fill: "var(--selection)" }} contentStyle={{ fontFamily: "var(--font-mono)", fontSize: 11, border: "1px solid var(--hairline)", borderRadius: 6, background: "var(--surface)", color: "var(--ink)" }} formatter={(v, _n, it) => [it.payload.lim != null ? `${v} de ${it.payload.lim} (${it.payload.pct} %)` : `${v} T1 · ${it.payload.direto} direto + ${it.payload.vrf} em VRF`, "T1"]} />
+              <Tooltip cursor={{ fill: "var(--selection)" }} contentStyle={{ fontFamily: "var(--font-mono)", fontSize: 11, border: "1px solid var(--hairline)", borderRadius: 6, background: "var(--surface)", color: "var(--ink)" }} formatter={(v, _n, it) => [`${v} de ${it.payload.lim} (${it.payload.pct} %)` + (it.payload.direto != null ? ` · ${it.payload.direto} direto + ${it.payload.vrf} em VRF` : ""), "T1"]} />
               <Bar dataKey="n" radius={[0, 3, 3, 0]}>
                 {data.map((r, i) => <Cell key={i} fill={cor(r.pct)} />)}
                 <LabelList dataKey="n" position="right" content={({ x, y, width, height, value, index }) => <text x={x + width + 4} y={y + height / 2 + 4} style={{ fontFamily: "var(--font-mono)", fontSize: 10.5, fill: "var(--ink)" }}>{data[index].lim != null ? `${value}/${data[index].lim}` : value}</text>} />
@@ -610,7 +610,7 @@ function TresOlhos() {
       </Card>
       {n && (
         <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) minmax(0,1fr)", gap: 14 }}>
-          <T1Bars rows={n.t0} nameKey="t0_name" title={`T1 por T0 (par de edges · direto + VRFs) · ${n.site}`} semLimite />
+          <T1Bars rows={n.t0} nameKey="t0_name" title={`T1 por T0 (par de edges · direto + VRFs · limite 600) · ${n.site}`} />
           <T1Bars rows={n.vrf} nameKey="vrf_name" title={`T1 por VRF · ${n.site}`} />
         </div>
       )}

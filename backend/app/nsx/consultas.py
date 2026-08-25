@@ -21,6 +21,9 @@ from .config import Aliases
 from .modelos import EventoT1, PontoHistorico, ResumoSite, T1PorT0, T1PorVrf
 
 JANELA_ULTIMO = "-15m"  # 3 ciclos de capacity (intervals.slow = 5m)
+# Premissa de arquitetura: 600 T1 por T0 (par de edge nodes), contando direto + VRFs.
+# O limit de 1000 que o collector grava em nsx_t1_per_t0 vale só para os diretos.
+T0_T1_LIMIT = 600
 
 
 def _i(v: Any) -> int | None:
@@ -175,17 +178,18 @@ class Consultas:
         for r in self.c.query(flux_per_t0(self.b_cap, self.aliases, site)):
             nome = r.get("t0_name") or ""
             direto = _i(r.get("t1_count")) or 0
+            total = direto + via_vrf.get(nome, 0)
             out.append(
                 T1PorT0(
                     site=self.aliases.canonico(r["site"]),
                     t0_name=nome,
                     t0_id=r.get("t0_id") or "",
-                    t1_count=direto + via_vrf.get(nome, 0),
+                    t1_count=total,
                     t1_direct=direto,
                     t1_via_vrf=via_vrf.get(nome, 0),
-                    limit=_i(r.get("limit")) or 0,
-                    usage_pct=_f(r.get("usage_pct")) or 0.0,
-                    available=_i(r.get("available")) or 0,
+                    limit=T0_T1_LIMIT,
+                    usage_pct=round(100.0 * total / T0_T1_LIMIT, 2),
+                    available=max(0, T0_T1_LIMIT - total),
                     atualizado_em=r.get("_time"),
                 )
             )

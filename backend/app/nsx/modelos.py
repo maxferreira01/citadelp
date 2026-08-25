@@ -33,8 +33,8 @@ class ResumoSite:
 class T1PorT0:
     """T1 por T0 = par de edge nodes. ``t1_count`` é a UNIÃO (direto no T0 +
     nas VRFs filhas) — o collector grava só os diretos em ``nsx_t1_per_t0``;
-    ``t1_direct``/``t1_via_vrf`` guardam a quebra. ``limit`` é o do collector
-    para os diretos (t0_t1_limit_default), informativo."""
+    ``t1_direct``/``t1_via_vrf`` guardam a quebra. ``limit`` = 600 por T0
+    (premissa de arquitetura, consultas.T0_T1_LIMIT), sobre a união."""
 
     site: str
     t0_name: str

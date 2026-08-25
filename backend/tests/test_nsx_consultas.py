@@ -115,7 +115,12 @@ def test_por_t0_e_a_uniao_direto_mais_vrfs():
     assert [t.t0_name for t in linhas] == ["T0-Cluster_1", "T0-Cluster_4"]
     c1 = linhas[0]
     assert (c1.t1_direct, c1.t1_via_vrf, c1.t1_count) == (203, 401, 604)
-    assert linhas[1].t1_count == 34 and linhas[1].t1_via_vrf == 0 and linhas[1].limit == 1000
+    assert linhas[1].t1_count == 34 and linhas[1].t1_via_vrf == 0
+    assert (c1.limit, c1.usage_pct, c1.available) == (
+        600,
+        100.67,
+        0,
+    )  # 600/T0, não o 1000 do collector
     assert c1.atualizado_em == "2026-08-25T18:38:12Z"
 
 
