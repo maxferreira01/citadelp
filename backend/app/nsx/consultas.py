@@ -24,6 +24,7 @@ JANELA_ULTIMO = "-15m"  # 3 ciclos de capacity (intervals.slow = 5m)
 # Premissa de arquitetura: 600 T1 por T0 (par de edge nodes), contando direto + VRFs.
 # O limit de 1000 que o collector grava em nsx_t1_per_t0 vale só para os diretos.
 T0_T1_LIMIT = 600
+VRF_T1_LIMIT = 200  # premissa por VRF (o collector grava o mesmo valor em nsx_t1_per_vrf.limit)
 
 
 def _i(v: Any) -> int | None:
@@ -231,3 +232,70 @@ class Consultas:
             )
             for r in self.c.query(flux_eventos(self.b_nsx, self.aliases, site, dias))
         ]
+
+    def tabela(self, site: str | None = None) -> list[dict]:
+        """Linhas no formato da planilha de capacity (uma por VRF, mais uma por T0
+        com os T1 diretos): Edge · Node · Limite-node · vrf-number · limite-vrf ·
+        Dia · Mes · Ano · Qtd-vrf."""
+        sites = [site] if site else [r.site for r in self.resumo()]
+        out: list[dict] = []
+        for s_ in sites:
+            for t in self.por_t0(s_):
+                dia, mes, ano = _dma(t.atualizado_em)
+                out.append(
+                    {
+                        "edge": s_,
+                        "node": t.t0_name,
+                        "limite_node": T0_T1_LIMIT,
+                        "vrf": "(direto no T0)",
+                        "limite_vrf": None,
+                        "dia": dia,
+                        "mes": mes,
+                        "ano": ano,
+                        "qtd": t.t1_direct,
+                        "qtd_node": t.t1_count,
+                    }
+                )
+                for v in self.por_vrf(s_):
+                    if v.t0_parent != t.t0_name:
+                        continue
+                    dia, mes, ano = _dma(v.atualizado_em)
+                    out.append(
+                        {
+                            "edge": s_,
+                            "node": t.t0_name,
+                            "limite_node": T0_T1_LIMIT,
+                            "vrf": v.vrf_name,
+                            "limite_vrf": v.limit or VRF_T1_LIMIT,
+                            "dia": dia,
+                            "mes": mes,
+                            "ano": ano,
+                            "qtd": v.t1_count,
+                            "qtd_node": t.t1_count,
+                        }
+                    )
+            for v in self.por_vrf(s_):
+                if any(t.t0_name == v.t0_parent for t in self.por_t0(s_)):
+                    continue
+                dia, mes, ano = _dma(v.atualizado_em)
+                out.append(
+                    {
+                        "edge": s_,
+                        "node": v.t0_parent or "-",
+                        "limite_node": None,
+                        "vrf": v.vrf_name,
+                        "limite_vrf": v.limit or VRF_T1_LIMIT,
+                        "dia": dia,
+                        "mes": mes,
+                        "ano": ano,
+                        "qtd": v.t1_count,
+                        "qtd_node": None,
+                    }
+                )
+        return out
+
+
+def _dma(iso: str | None) -> tuple[int | None, int | None, int | None]:
+    if not iso or len(iso) < 10:
+        return None, None, None
+    return int(iso[8:10]), int(iso[5:7]), int(iso[0:4])

@@ -8,11 +8,14 @@ Nenhuma rota toca NSX Manager, e não há escrita em lugar nenhum: o citadel
 
 from __future__ import annotations
 
+import csv
+import io
 import json
 import re
 from functools import lru_cache
 
 from fastapi import APIRouter, HTTPException, Query
+from fastapi.responses import PlainTextResponse
 
 from .artefatos import ultimo_snapshot
 from .client import InfluxClient, NsxError
@@ -85,3 +88,47 @@ def snapshot(site: str) -> dict:
     if caminho is None:
         raise HTTPException(404, f"nenhum snapshot gerado para '{site}'")
     return json.loads(caminho.read_text(encoding="utf-8"))
+
+
+@router.get("/t1/tabela")
+def tabela(
+    site: str | None = Query(default=None), formato: str = Query(default="json")
+) -> list[dict]:
+    """Formato da planilha de capacity (Edge/Node/Limite/VRF/Dia/Mes/Ano/Qtd).
+    ``formato=csv`` devolve texto para colar na planilha."""
+    q = _consultas()
+    linhas = _run(lambda: q.tabela(_site(site) if site else None))
+    if formato != "csv":
+        return linhas
+    buf = io.StringIO()
+    w = csv.writer(buf, delimiter=";")
+    w.writerow(
+        [
+            "Edge",
+            "Node",
+            "Limite-node",
+            "vrf-number",
+            "limite-vrf",
+            "Dia",
+            "Mes",
+            "Ano",
+            "Qtd-vrf",
+            "Qtd-node",
+        ]
+    )
+    for r in linhas:
+        w.writerow(
+            [
+                r["edge"],
+                r["node"],
+                r["limite_node"],
+                r["vrf"],
+                r["limite_vrf"],
+                r["dia"],
+                r["mes"],
+                r["ano"],
+                r["qtd"],
+                r["qtd_node"],
+            ]
+        )
+    return PlainTextResponse(buf.getvalue(), media_type="text/csv; charset=utf-8")

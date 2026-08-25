@@ -738,14 +738,205 @@ function TrajetoriaEventos({ site, hist, datas, proj, op, eventos, days, conf })
   );
 }
 
+
+/* ---- Tabela no formato da planilha de capacity ---------------------------- */
+function TabelaT1({ site }) {
+  const [rows, setRows] = useState(null);
+  const [err, setErr] = useState("");
+  const [todos, setTodos] = useState(false);
+  React.useEffect(() => {
+    setRows(null); setErr("");
+    api("/nsx/t1/tabela" + (todos ? "" : `?site=${encodeURIComponent(site)}`)).then(setRows).catch((e) => setErr(String(e.message || e)));
+  }, [site, todos]);
+  const cols = ["Edge", "Node", "Limite-node", "vrf-number", "limite-vrf", "Dia", "Mes", "Ano", "Qtd-vrf"];
+  const csv = () => {
+    const linhas = [cols.join(";"), ...(rows || []).map((r) => [r.edge, r.node, r.limite_node ?? "", r.vrf, r.limite_vrf ?? "", r.dia, r.mes, r.ano, r.qtd].join(";"))].join("\n");
+    navigator.clipboard?.writeText(linhas);
+  };
+  return (
+    <Card style={{ padding: 0, overflow: "hidden" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "15px 18px 10px", gap: 8, flexWrap: "wrap" }}>
+        <Cap>tabela de capacity — {todos ? "todos os sites" : site}</Cap>
+        <span style={{ display: "inline-flex", gap: 8, alignItems: "center" }}>
+          <Btn sec onClick={() => setTodos((v) => !v)}>{todos ? "só este site" : "todos os sites"}</Btn>
+          <Btn sec onClick={csv} disabled={!rows}>copiar CSV (;)</Btn>
+          <Chip m="OBS" s="nsx-collector → InfluxDB" />
+        </span>
+      </div>
+      {err && <div style={{ padding: "0 18px 14px", color: "var(--state-crit)", fontSize: 12 }}>{err}</div>}
+      <div className="tscroll">
+        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5 }}>
+          <thead><tr style={{ borderTop: "1px solid var(--hairline)", borderBottom: "1px solid var(--hairline-strong)" }}>
+            {cols.map((h, i) => <th key={h} style={{ textAlign: i >= 2 && i !== 3 ? "right" : "left", padding: "7px 14px", font: "600 10px var(--font-ui)", letterSpacing: ".14em", textTransform: "uppercase", color: "var(--text-muted)", whiteSpace: "nowrap" }}>{h}</th>)}
+          </tr></thead>
+          <tbody>{(rows || []).map((r, i) => {
+            const direto = r.vrf === "(direto no T0)";
+            const pct = r.limite_vrf ? r.qtd / r.limite_vrf : r.limite_node ? r.qtd_node / r.limite_node : 0;
+            const st = stT1(pct * 100);
+            return (
+              <tr key={i} style={{ borderBottom: "1px solid var(--hairline)", background: direto ? "var(--surface-sunken)" : "transparent" }}>
+                <td className="num" style={{ padding: "6px 14px" }}>{r.edge}</td>
+                <td style={{ padding: "6px 14px" }}>{r.node}</td>
+                <td className="num" style={{ padding: "6px 14px", textAlign: "right" }}>{r.limite_node ?? "—"}</td>
+                <td style={{ padding: "6px 14px", color: direto ? "var(--text-muted)" : "var(--ink)" }}>{r.vrf}</td>
+                <td className="num" style={{ padding: "6px 14px", textAlign: "right" }}>{r.limite_vrf ?? "—"}</td>
+                <td className="num" style={{ padding: "6px 14px", textAlign: "right" }}>{r.dia}</td>
+                <td className="num" style={{ padding: "6px 14px", textAlign: "right" }}>{r.mes}</td>
+                <td className="num" style={{ padding: "6px 14px", textAlign: "right" }}>{r.ano}</td>
+                <td className="num" style={{ padding: "6px 14px", textAlign: "right" }}><St st={st} label={String(r.qtd)} /></td>
+              </tr>);
+          })}</tbody>
+        </table>
+      </div>
+      {rows && rows.length === 0 && <div style={{ padding: 18, color: "var(--text-muted)" }}>sem linhas</div>}
+      <div style={{ padding: "10px 18px 14px", fontSize: 11, color: "var(--text-muted)", fontFamily: "var(--font-mono)" }}>Node = T0 (par de edges) · linha sombreada = T1 pendurados direto no T0 · Dia/Mes/Ano = data do último ponto do collector</div>
+    </Card>
+  );
+}
+
+/* ---- Projeção (modelo da planilha "Capacity 2k29", linhas 1–18) ------------ */
+/* Parte do edge produtivo (TESP7) com o realizado do Influx e projeta mês a mês: */
+/* fase 1 = baseline + MI até o mês de corte; fase 2 = baseline do ano seguinte;   */
+/* capacity = 2.000 + extras (+400 por edge node) e troca de site quando nasce.  */
+const EDGE_PRODUTIVO = "TESP7";
+const PROJ_DEFAULT = {
+  fase1: 139, mi: 16, fase1Ate: "2026-12", fase2: 130, meses: 24, limite: 2000,
+  extras: [{ mes: "2026-10", t1: 400, desc: "TESP07 · EDGE NODE04" }, { mes: "2027-01", t1: 400, desc: "TESP07 · novo par (EDGE NODE05)" }],
+  novoSite: { mes: "2027-06", nome: "TESP07B", capacity: 2400 },
+};
+const LS_PROJ = "citadel_proj_t1";
+const addMes = (ym, k) => { const [y, m] = ym.split("-").map(Number); const d = new Date(Date.UTC(y, m - 1 + k, 1)); return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`; };
+const fmtYM = (ym) => { const [y, m] = ym.split("-"); return `${["jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez"][+m - 1]}/${y.slice(2)}`; };
+function projetarBruno(p, atual, inicioYM) {
+  const linhas = []; let acc = atual, cap = p.limite, site = EDGE_PRODUTIVO, esgotouEm = null;
+  for (let k = 1; k <= p.meses; k++) {
+    const ym = addMes(inicioYM, k);
+    const cresc = ym <= p.fase1Ate ? p.fase1 + p.mi : p.fase2;
+    const eventos = [];
+    if (p.novoSite.nome && ym === p.novoSite.mes) { acc = 0; cap = p.novoSite.capacity; site = p.novoSite.nome; eventos.push(`${p.novoSite.nome} entra com ${fmt(p.novoSite.capacity)}`); }
+    p.extras.filter((e) => e.mes === ym).forEach((e) => { cap += +e.t1; eventos.push(`+${e.t1} ${e.desc}`); });
+    acc += cresc;
+    const restante = cap - acc;
+    if (restante < 0 && !esgotouEm) esgotouEm = ym;
+    linhas.push({ ym, site, cresc, acc, cap, restante, eventos });
+  }
+  return { linhas, esgotouEm };
+}
+function ProjecaoT1({ sites }) {
+  const [p, setP] = useState(() => { try { return { ...PROJ_DEFAULT, ...JSON.parse(localStorage.getItem(LS_PROJ) || "{}") }; } catch { return PROJ_DEFAULT; } });
+  const [rodou, setRodou] = useState(null);
+  const prod = sites.find((s) => s.site === EDGE_PRODUTIVO);
+  const atual = prod?.total ?? 0;
+  const hoje = new Date(); const inicioYM = `${hoje.getFullYear()}-${String(hoje.getMonth() + 1).padStart(2, "0")}`;
+  const set = (k, v) => setP((o) => ({ ...o, [k]: v }));
+  const setExtra = (i, k, v) => setP((o) => ({ ...o, extras: o.extras.map((e, j) => j === i ? { ...e, [k]: v } : e) }));
+  const rodar = () => { const r = projetarBruno(p, atual, inicioYM); setRodou(r); try { localStorage.setItem(LS_PROJ, JSON.stringify(p)); } catch { /* sem storage */ } };
+  const In = ({ k, w = 70, type = "number" }) => <input type={type} value={p[k]} onChange={(e) => set(k, type === "number" ? +e.target.value : e.target.value)} style={{ width: w, font: "500 12px var(--font-mono)", padding: "3px 6px", border: "1px solid var(--hairline)", borderRadius: 4, background: "var(--surface)", color: "var(--ink)" }} />;
+  const r = rodou;
+  const esc = r ? Math.max(...r.linhas.map((l) => Math.max(l.acc, l.cap))) * 1.05 : 1;
+  return (
+    <div style={{ display: "grid", gap: 14 }}>
+      <Card>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", flexWrap: "wrap", gap: 8 }}>
+          <Cap>projeção — parte do edge produtivo ({EDGE_PRODUTIVO})</Cap>
+          <span style={{ display: "inline-flex", gap: 6 }}><Chip m="OBS" s={`${EDGE_PRODUTIVO} hoje = ${fmt(atual)} T1`} /><Chip m="MAN" s="premissas da planilha Capacity 2k29" /></span>
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))", gap: "10px 18px", marginTop: 12, fontSize: 12 }}>
+          <label>crescimento/mês (baseline dez–mai) <In k="fase1" /></label>
+          <label>MI/mês (clientes até fim de 2026) <In k="mi" /></label>
+          <label>fase 1 vale até <In k="fase1Ate" type="month" w={130} /></label>
+          <label>crescimento/mês depois (baseline 2k27) <In k="fase2" /></label>
+          <label>limite por datacenter <In k="limite" /></label>
+          <label>horizonte (meses) <In k="meses" /></label>
+        </div>
+        <div style={{ marginTop: 12, display: "grid", gap: 6, fontSize: 12 }}>
+          <Cap>T1 extras por edge (capacity que entra)</Cap>
+          {p.extras.map((e, i) => (
+            <div key={i} style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+              <input type="month" value={e.mes} onChange={(ev) => setExtra(i, "mes", ev.target.value)} style={{ font: "500 12px var(--font-mono)", padding: "3px 6px", border: "1px solid var(--hairline)", borderRadius: 4, background: "var(--surface)", color: "var(--ink)" }} />
+              <input type="number" value={e.t1} onChange={(ev) => setExtra(i, "t1", +ev.target.value)} style={{ width: 70, font: "500 12px var(--font-mono)", padding: "3px 6px", border: "1px solid var(--hairline)", borderRadius: 4, background: "var(--surface)", color: "var(--ink)" }} />
+              <input value={e.desc} onChange={(ev) => setExtra(i, "desc", ev.target.value)} style={{ flex: 1, minWidth: 180, font: "500 12px var(--font-ui)", padding: "3px 6px", border: "1px solid var(--hairline)", borderRadius: 4, background: "var(--surface)", color: "var(--ink)" }} />
+              <Btn sec onClick={() => setP((o) => ({ ...o, extras: o.extras.filter((_, j) => j !== i) }))}>×</Btn>
+            </div>
+          ))}
+          <div><Btn sec onClick={() => setP((o) => ({ ...o, extras: [...o.extras, { mes: addMes(inicioYM, 3), t1: 400, desc: "" }] }))}>+ edge extra</Btn></div>
+          <Cap style={{ marginTop: 6 }}>novo site (zera a contagem)</Cap>
+          <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+            <input type="month" value={p.novoSite.mes} onChange={(ev) => set("novoSite", { ...p.novoSite, mes: ev.target.value })} style={{ font: "500 12px var(--font-mono)", padding: "3px 6px", border: "1px solid var(--hairline)", borderRadius: 4, background: "var(--surface)", color: "var(--ink)" }} />
+            <input value={p.novoSite.nome} onChange={(ev) => set("novoSite", { ...p.novoSite, nome: ev.target.value })} placeholder="nome (vazio = sem novo site)" style={{ width: 140, font: "500 12px var(--font-mono)", padding: "3px 6px", border: "1px solid var(--hairline)", borderRadius: 4, background: "var(--surface)", color: "var(--ink)" }} />
+            <input type="number" value={p.novoSite.capacity} onChange={(ev) => set("novoSite", { ...p.novoSite, capacity: +ev.target.value })} style={{ width: 80, font: "500 12px var(--font-mono)", padding: "3px 6px", border: "1px solid var(--hairline)", borderRadius: 4, background: "var(--surface)", color: "var(--ink)" }} />
+            <span style={{ color: "var(--text-muted)" }}>T1 de capacity</span>
+          </div>
+        </div>
+        <div style={{ marginTop: 14, display: "flex", gap: 10, alignItems: "center" }}>
+          <Btn onClick={rodar} disabled={!prod}>▶ gerar previsão</Btn>
+          <Btn sec onClick={() => { setP(PROJ_DEFAULT); setRodou(null); try { localStorage.removeItem(LS_PROJ); } catch { /* */ } }}>restaurar planilha</Btn>
+          {!prod && <span style={{ fontSize: 12, color: "var(--state-crit)" }}>sem dado do {EDGE_PRODUTIVO} no Influx</span>}
+        </div>
+      </Card>
+      {r && (
+        <>
+          <div style={{ background: r.esgotouEm ? "var(--state-warn-bg)" : "var(--state-ok-bg)", border: `1px solid ${r.esgotouEm ? "var(--state-warn)" : "var(--state-ok)"}`, borderRadius: "var(--radius)", padding: "11px 15px", fontSize: 13 }}>
+            {r.esgotouEm ? <><b>Capacity do {r.linhas.find((l) => l.ym === r.esgotouEm)?.site} esgota em {fmtYM(r.esgotouEm)}</b> com as premissas atuais.</> : <><b>Não esgota</b> no horizonte de {p.meses} meses.</>}
+            {" "}<span style={{ color: "var(--text-muted)" }}>Última linha: {fmt(r.linhas[r.linhas.length - 1].acc)} T1 em {r.linhas[r.linhas.length - 1].site}, restante {fmt(r.linhas[r.linhas.length - 1].restante)}.</span>
+          </div>
+          <Card>
+            <Cap>mapa do que está por vir — acumulado × capacity</Cap>
+            <svg viewBox="0 0 640 200" style={{ width: "100%", height: "auto", display: "block", marginTop: 8 }} role="img" aria-label="T1 acumulados por mês contra a capacity disponível">
+              {(() => { const W = 640, h = 200, n = r.linhas.length; const x = (i) => 40 + (i * (W - 56)) / Math.max(1, n - 1); const y = (v) => 14 + (h - 44) * (1 - v / esc);
+                const pathAcc = r.linhas.map((l, i) => `${i ? "L" : "M"}${x(i)},${y(l.acc)}`).join(" ");
+                const pathCap = r.linhas.map((l, i) => `${i ? "L" : "M"}${x(i)},${y(l.cap)}`).join(" ");
+                return <>
+                  {[0, .5, 1].map((f) => <g key={f}><line x1={40} x2={W - 16} y1={y(esc * f)} y2={y(esc * f)} stroke="var(--hairline)" strokeDasharray="2 3" /><text x={36} y={y(esc * f) + 3} textAnchor="end" style={{ font: "500 9px var(--font-mono)", fill: "var(--text-faint)" }}>{fmt(Math.round(esc * f))}</text></g>)}
+                  <path d={pathCap} fill="none" stroke="var(--cap-limit-op)" strokeWidth="1.6" strokeDasharray="5 4" />
+                  <path d={pathAcc} fill="none" stroke="var(--action)" strokeWidth="2" />
+                  {r.linhas.map((l, i) => l.eventos.length ? <g key={i}><line x1={x(i)} x2={x(i)} y1={12} y2={h - 26} stroke="var(--state-info)" strokeDasharray="3 3" /><title>{l.eventos.join(" · ")}</title></g> : null)}
+                  {r.esgotouEm && (() => { const i = r.linhas.findIndex((l) => l.ym === r.esgotouEm); return <g><circle cx={x(i)} cy={y(r.linhas[i].acc)} r={5} fill="var(--state-crit)" stroke="var(--surface)" strokeWidth="1.5" /><text x={x(i)} y={y(r.linhas[i].acc) - 9} textAnchor="middle" style={{ font: "600 9.5px var(--font-mono)", fill: "var(--state-crit)" }}>esgota {fmtYM(r.esgotouEm)}</text></g>; })()}
+                  {r.linhas.map((l, i) => (i % 3 === 0 || i === n - 1) ? <text key={i} x={x(i)} y={h - 8} textAnchor="middle" style={{ font: "500 9px var(--font-mono)", fill: "var(--text-faint)" }}>{fmtYM(l.ym)}</text> : null)}
+                </>; })()}
+            </svg>
+            <div style={{ marginTop: 6, display: "flex", gap: 14, fontSize: 10.5, fontFamily: "var(--font-mono)", color: "var(--text-muted)" }}><span style={{ color: "var(--action)" }}>— acumulado (projetado)</span><span style={{ color: "var(--cap-limit-op)" }}>‒ ‒ capacity</span><span style={{ color: "var(--state-info)" }}>┆ edge extra / novo site</span></div>
+          </Card>
+          <Card style={{ padding: 0, overflow: "hidden" }}>
+            <div style={{ padding: "15px 18px 10px" }}><Cap>mês a mês (mesmas linhas da planilha: acumulado · MoM · capacity normal · evento)</Cap></div>
+            <div className="tscroll">
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5 }}>
+                <thead><tr style={{ borderTop: "1px solid var(--hairline)", borderBottom: "1px solid var(--hairline-strong)" }}>
+                  {["mês", "site", "cresc. MoM", "acumulado", "capacity", "restante", "evento"].map((h, i) => <th key={h} style={{ textAlign: i >= 2 && i <= 5 ? "right" : "left", padding: "7px 14px", font: "600 10px var(--font-ui)", letterSpacing: ".14em", textTransform: "uppercase", color: "var(--text-muted)", whiteSpace: "nowrap" }}>{h}</th>)}
+                </tr></thead>
+                <tbody>{r.linhas.map((l) => { const st = l.restante < 0 ? "crit" : l.restante < l.cap * 0.15 ? "warn" : "ok"; return (
+                  <tr key={l.ym} style={{ borderBottom: "1px solid var(--hairline)", background: l.eventos.length ? "var(--surface-sunken)" : "transparent" }}>
+                    <td className="num" style={{ padding: "6px 14px" }}>{fmtYM(l.ym)}</td>
+                    <td style={{ padding: "6px 14px" }}>{l.site}</td>
+                    <td className="num" style={{ padding: "6px 14px", textAlign: "right" }}>+{l.cresc}</td>
+                    <td className="num" style={{ padding: "6px 14px", textAlign: "right" }}>{fmt(l.acc)}</td>
+                    <td className="num" style={{ padding: "6px 14px", textAlign: "right", color: "var(--cap-limit-op)" }}>{fmt(l.cap)}</td>
+                    <td className="num" style={{ padding: "6px 14px", textAlign: "right" }}><St st={st} label={fmt(l.restante)} /></td>
+                    <td style={{ padding: "6px 14px", fontSize: 11.5, color: "var(--text-muted)" }}>{l.eventos.join(" · ")}</td>
+                  </tr>); })}</tbody>
+              </table>
+            </div>
+          </Card>
+        </>
+      )}
+    </div>
+  );
+}
+
 function TresOlhos() {
   const [site, setSite] = useState("");
+  const [aba, setAba] = useState("painel");
   const nsx = useNsxT1(site);
   const n = nsx.data;
+  const Aba = ({ id, children }) => <button onClick={() => setAba(id)} aria-pressed={aba === id} style={{ font: "600 11.5px var(--font-ui)", padding: "6px 14px", borderRadius: 4, cursor: "pointer", border: "1px solid " + (aba === id ? "var(--action)" : "var(--hairline)"), background: aba === id ? "var(--selection)" : "var(--surface)", color: aba === id ? "var(--action)" : "var(--text-muted)" }}>{children}</button>;
   const r = n || { id: "nsxt1", name: "NSX T1 Gateways", hist: [], proj: [], op: NSX_T1_OP_LIMIT, tech: null, days: null, conf: "—" };
   const alerta = n && n.days != null && n.days <= 180;
   return (
     <div style={{ display: "grid", gap: 14 }}>
+      <div style={{ display: "flex", gap: 6 }}><Aba id="painel">painel</Aba><Aba id="tabela">tabela</Aba><Aba id="projecao">▶ previsão</Aba></div>
+      {aba === "tabela" && n && <TabelaT1 site={n.site} />}
+      {aba === "projecao" && <ProjecaoT1 sites={nsx.sites} />}
+      {aba === "painel" && <>
       <div style={{ background: alerta ? "var(--state-crit-bg)" : "var(--surface)", border: `1px solid ${alerta ? "var(--state-crit)" : "var(--hairline)"}`, borderRadius: "var(--radius)", padding: "11px 15px", display: "flex", alignItems: "center", gap: 13, flexWrap: "wrap" }}>
         <span style={{ fontFamily: "var(--font-mono)", color: alerta ? "var(--state-crit)" : "var(--text-muted)", fontSize: 15 }}>{alerta ? "▲" : "●"}</span>
         <div style={{ flex: 1, minWidth: 200 }}>
@@ -785,6 +976,7 @@ function TresOlhos() {
       )}
         </div>
       </details>
+      </>}
     </div>
   );
 }
