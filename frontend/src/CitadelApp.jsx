@@ -325,18 +325,20 @@ function useNsxT1(site) {
         setSites(resumo);
         const alvo = resumo.find((r) => r.site === site) || resumo[0];
         if (!alvo) { setData(null); setBusy(false); return; }
-        const [hist, t0, vrf] = await Promise.all([
+        const [hist, t0, vrf, eventos] = await Promise.all([
           api(`/nsx/t1/historico?site=${encodeURIComponent(alvo.site)}&dias=90`),
           api(`/nsx/t1/por-t0?site=${encodeURIComponent(alvo.site)}`),
           api(`/nsx/t1/por-vrf?site=${encodeURIComponent(alvo.site)}`),
+          api(`/nsx/t1/eventos?site=${encodeURIComponent(alvo.site)}&dias=90`),
         ]);
         if (!vivo) return;
-        const serie = hist.map((h) => h.total).filter((v) => v != null);
+        const pontos = hist.filter((h) => h.total != null);
+        const serie = pontos.map((h) => h.total);
         const op = NSX_T1_OP_LIMIT;
         const usage = alvo.total ?? alvo.nsx_current ?? 0;
         const { proj, days, conf } = projetar(serie, op);
         const st = usage >= op ? "crit" : usage >= op * 0.85 ? "warn" : "ok";
-        setData({ id: "nsxt1", name: `NSX T1 Gateways · ${alvo.site}`, site: alvo.site, usage, op, tech: null, days, conf, st, hist: serie, proj, t0, vrf, resumo: alvo });
+        setData({ id: "nsxt1", name: `NSX T1 Gateways · ${alvo.site}`, site: alvo.site, usage, op, tech: null, days, conf, st, hist: serie, datas: pontos.map((h) => h.quando), eventos, proj, t0, vrf, resumo: alvo });
       } catch (e) { if (vivo) setErr(String(e.message || e)); }
       if (vivo) setBusy(false);
     })();
@@ -575,6 +577,167 @@ function Conselho({ go }) {
   );
 }
 
+
+/* ---- T1 · três leituras empilhadas (candidatas) ------------------------- */
+const T0_LIMIT = 600, VRF_LIMIT = 200;
+/* Pilha de um T0: um só matiz, claro→escuro (direto, vrf_1, vrf_2…) — é parte-de-um-todo, não categoria. */
+const PILHA = ["#0E4F6E", "#3C8DAA", "#A9D3E0", "#D6E9F0"];
+const stT1 = (pct) => pct >= 100 ? "crit" : pct >= 90 ? "warn" : "ok";
+const stLabel = { crit: "no limite", warn: "atenção", ok: "folga" };
+
+/* (1) Mapa do site: um bloco por T0 (par de edges), pilha até 600, VRFs até 200. */
+function MapaSite({ site, t0, vrf }) {
+  const [hov, setHov] = useState(null);
+  const porT0 = t0.map((t) => ({ ...t, vrfs: vrf.filter((v) => v.t0_parent === t.t0_name) }));
+  const soltas = vrf.filter((v) => !t0.some((t) => t.t0_name === v.t0_parent));
+  const Segs = ({ t }) => {
+    const partes = [{ k: "direto no T0", n: t.t1_direct, c: PILHA[0] }, ...t.vrfs.map((v, i) => ({ k: v.vrf_name, n: v.t1_count, c: PILHA[Math.min(i + 1, PILHA.length - 1)] }))];
+    const esc = Math.max(T0_LIMIT, t.t1_count);
+    let acc = 0;
+    return (
+      <div style={{ position: "relative", height: 14, background: "var(--surface-sunken)", borderRadius: 4, marginTop: 8 }}>
+        {partes.filter((x) => x.n > 0).map((x, i) => { const l = (acc / esc) * 100, w = (x.n / esc) * 100; acc += x.n; return (
+          <div key={i} title={`${x.k}: ${x.n} T1`} onMouseEnter={() => setHov(`${t.t0_name} · ${x.k}: ${x.n} T1`)} onMouseLeave={() => setHov(null)}
+            style={{ position: "absolute", top: 0, bottom: 0, left: `${l}%`, width: `calc(${w}% - 2px)`, background: x.c, borderRadius: i === 0 ? "4px 0 0 4px" : 0, boxShadow: "2px 0 0 var(--surface)" }} />); })}
+        <div style={{ position: "absolute", top: -3, bottom: -3, left: `${(T0_LIMIT / esc) * 100}%`, width: 2, background: "var(--cap-limit-op)" }} title={`limite ${T0_LIMIT}`} />
+      </div>
+    );
+  };
+  return (
+    <Card>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", flexWrap: "wrap", gap: 8 }}>
+        <Cap>1 · mapa do site — T1 por par de edges (T0) e por VRF · {site}</Cap>
+        <span style={{ display: "inline-flex", gap: 6 }}><Chip m="OBS" s="per_t0 + per_vrf" /><Chip m="MAN" s="600/T0 · 200/VRF" /></span>
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(230px, 1fr))", gap: 12, marginTop: 12 }}>
+        {porT0.map((t) => { const st = stT1(t.usage_pct); return (
+          <div key={t.t0_name} style={{ border: "1px solid var(--hairline)", borderLeft: `3px solid ${SCOLOR[st]}`, borderRadius: 6, padding: "10px 12px" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+              <span style={{ font: "600 12.5px var(--font-ui)" }}>{t.t0_name}</span>
+              <St st={st} label={`${fmt(t.t1_count)} / ${T0_LIMIT} · ${stLabel[st]}`} />
+            </div>
+            <Segs t={t} />
+            <div style={{ display: "grid", gap: 5, marginTop: 10 }}>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr auto", fontSize: 11, fontFamily: "var(--font-mono)", color: "var(--text-muted)" }}><span>direto no T0</span><span className="num">{t.t1_direct}</span></div>
+              {t.vrfs.map((v, i) => { const pv = v.t1_count / VRF_LIMIT; return (
+                <div key={v.vrf_name} style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 8, alignItems: "center", fontSize: 11, fontFamily: "var(--font-mono)" }}>
+                  <div>
+                    <div style={{ display: "flex", justifyContent: "space-between", color: "var(--text-muted)" }}><span>{v.vrf_name.replace(t.t0_name + "-", "")}</span><span className="num">{v.t1_count}/{VRF_LIMIT}</span></div>
+                    <div style={{ position: "relative", height: 6, background: "var(--surface-sunken)", borderRadius: 3, marginTop: 2 }}>
+                      <div title={`${v.vrf_name}: ${v.t1_count}/${VRF_LIMIT}`} style={{ position: "absolute", inset: "0 auto 0 0", width: `${Math.min(100, pv * 100)}%`, background: PILHA[Math.min(i + 1, PILHA.length - 1)], borderRadius: 3 }} />
+                    </div>
+                  </div>
+                  <span aria-hidden style={{ color: SCOLOR[stT1(pv * 100)] }}>{GLYPH[stT1(pv * 100)]}</span>
+                </div>); })}
+            </div>
+          </div>); })}
+        {soltas.length > 0 && (
+          <div style={{ border: "1px dashed var(--hairline)", borderRadius: 6, padding: "10px 12px", fontSize: 11, fontFamily: "var(--font-mono)", color: "var(--text-muted)" }}>
+            <div style={{ font: "600 12.5px var(--font-ui)", color: "var(--ink)" }}>VRFs sem T0 resolvido</div>
+            <div style={{ marginTop: 4 }}>o collector gravou t0_parent = "-"</div>
+            {soltas.map((v) => <div key={v.vrf_name} style={{ display: "flex", justifyContent: "space-between", marginTop: 6 }}><span>{v.vrf_name}</span><span className="num">{v.t1_count}/{VRF_LIMIT}</span></div>)}
+          </div>
+        )}
+      </div>
+      <div style={{ marginTop: 10, display: "flex", gap: 14, flexWrap: "wrap", fontSize: 10.5, fontFamily: "var(--font-mono)", color: "var(--text-muted)" }}>
+        <span><i style={{ display: "inline-block", width: 10, height: 10, background: PILHA[0], borderRadius: 2, verticalAlign: -1, marginRight: 5 }} />direto no T0</span>
+        <span><i style={{ display: "inline-block", width: 10, height: 10, background: PILHA[1], borderRadius: 2, verticalAlign: -1, marginRight: 5 }} />vrf_1</span>
+        <span><i style={{ display: "inline-block", width: 10, height: 10, background: PILHA[2], borderRadius: 2, verticalAlign: -1, marginRight: 5 }} />vrf_2</span>
+        <span><i style={{ display: "inline-block", width: 2, height: 10, background: "var(--cap-limit-op)", verticalAlign: -1, marginRight: 5 }} />limite 600</span>
+        <span style={{ marginLeft: "auto" }}>{hov || " "}</span>
+      </div>
+    </Card>
+  );
+}
+
+/* (2) Medidor do parque: os 8 sites numa régua 0–2000, zona de atenção a 85 %. */
+function MedidorParque({ sites, sel, onSel }) {
+  const rows = [...sites].sort((a, b) => (b.total ?? 0) - (a.total ?? 0));
+  const esc = Math.max(NSX_T1_OP_LIMIT, ...rows.map((r) => r.total ?? 0)) * 1.06;
+  const pos = (v) => `${(v / esc) * 100}%`;
+  const total = rows.reduce((a, r) => a + (r.total ?? 0), 0);
+  return (
+    <Card>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", flexWrap: "wrap", gap: 8 }}>
+        <Cap>2 · parque — T1 por datacenter contra o limite de 2.000</Cap>
+        <span style={{ display: "inline-flex", gap: 6 }}><Chip m="OBS" s={`${rows.length} sites · ${fmt(total)} T1`} /><Chip m="MAN" s="2.000/DC · atenção a 85 %" /></span>
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "120px 1fr 96px", gap: "6px 12px", alignItems: "center", marginTop: 12 }}>
+        {rows.map((r) => { const v = r.total ?? 0, pct = (100 * v) / NSX_T1_OP_LIMIT, st = stT1(pct), ativo = r.site === sel; return (
+          <React.Fragment key={r.site}>
+            <button onClick={() => onSel(r.site)} style={{ textAlign: "left", background: "none", border: 0, padding: 0, cursor: "pointer", font: `${ativo ? 700 : 500} 12px var(--font-mono)`, color: ativo ? "var(--action)" : "var(--ink)" }}>{r.site}</button>
+            <div title={`${r.site}: ${fmt(v)} de ${fmt(NSX_T1_OP_LIMIT)} (${Math.round(pct)} %)`} style={{ position: "relative", height: 16, background: "var(--surface-sunken)", borderRadius: 4 }}>
+              <div style={{ position: "absolute", top: 0, bottom: 0, left: pos(NSX_T1_OP_LIMIT * 0.85), right: `calc(100% - ${pos(NSX_T1_OP_LIMIT)})`, background: "var(--state-warn-bg)" }} />
+              <div style={{ position: "absolute", top: 0, bottom: 0, left: pos(NSX_T1_OP_LIMIT), right: 0, background: "var(--state-crit-bg)", borderRadius: "0 4px 4px 0" }} />
+              <div style={{ position: "absolute", top: 3, bottom: 3, left: 0, width: pos(v), background: st === "ok" ? "var(--action)" : SCOLOR[st], borderRadius: "0 3px 3px 0", opacity: ativo ? 1 : .85 }} />
+              <div style={{ position: "absolute", top: -2, bottom: -2, left: pos(NSX_T1_OP_LIMIT), width: 2, background: "var(--cap-limit-op)" }} />
+            </div>
+            <St st={st} label={`${fmt(v)} · ${Math.round(pct)} %`} />
+          </React.Fragment>); })}
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "120px 1fr 96px", gap: "0 12px", marginTop: 4 }}>
+        <span /><div style={{ position: "relative", height: 12, fontSize: 9.5, fontFamily: "var(--font-mono)", color: "var(--text-faint)" }}>
+          <span style={{ position: "absolute", left: 0 }}>0</span>
+          <span style={{ position: "absolute", left: pos(NSX_T1_OP_LIMIT * 0.85), transform: "translateX(-50%)" }}>85 %</span>
+          <span style={{ position: "absolute", left: pos(NSX_T1_OP_LIMIT), transform: "translateX(-50%)", color: "var(--cap-limit-op)" }}>2.000</span>
+        </div><span />
+      </div>
+    </Card>
+  );
+}
+
+/* (3) Trajetória com os eventos (▲ created ▼ deleted) sobre a linha, 90 d. */
+function TrajetoriaEventos({ site, hist, datas, proj, op, eventos, days, conf }) {
+  const [hov, setHov] = useState(null);
+  const h = 190, W = 640;
+  if (!hist.length) return <Card><Cap>3 · trajetória · {site}</Cap><div style={{ marginTop: 10, color: "var(--state-nocollect)", fontFamily: "var(--font-mono)", fontSize: 12 }}>◌ sem coleta</div></Card>;
+  const all = [...hist, ...proj];
+  const min = Math.min(...all) * 0.985, max = Math.max(...all, op * 0.0) * 1.01;
+  const lo = Math.min(min, max - 1), hi = max;
+  const n = hist.length + proj.length - 1;
+  const x = (i) => 40 + (i * (W - 56)) / n;
+  const y = (v) => 14 + (h - 40) * (1 - (v - lo) / (hi - lo));
+  const path = (arr, off = 0) => arr.map((v, i) => `${i ? "L" : "M"}${x(i + off)},${y(v)}`).join(" ");
+  const d0 = new Date(datas[0]), d1 = new Date(datas[datas.length - 1]);
+  const idx = (iso) => { const t = new Date(iso); return Math.max(0, Math.min(hist.length - 1, Math.round(((t - d0) / (d1 - d0 || 1)) * (hist.length - 1)))); };
+  const evs = eventos.map((e) => ({ ...e, i: idx(e.quando) }));
+  const fmtD = (iso) => new Date(iso).toLocaleDateString("pt-BR", { day: "2-digit", month: "short" });
+  const opDentro = op >= lo && op <= hi;
+  return (
+    <Card>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", flexWrap: "wrap", gap: 8 }}>
+        <Cap>3 · trajetória 90 d com eventos · {site}</Cap>
+        <span style={{ display: "inline-flex", gap: 6, alignItems: "baseline" }}>
+          {days != null && <span className="num" style={{ font: "700 13px var(--font-mono)", color: "var(--cap-limit-op)" }}>{days} dias · {conf}</span>}
+          <Chip m="OBS" s={`${eventos.filter((e) => e.event === "created").length} created · ${eventos.filter((e) => e.event === "deleted").length} deleted`} /><Chip m="CALC" s="projeção linear" />
+        </span>
+      </div>
+      <svg viewBox={`0 0 ${W} ${h}`} style={{ width: "100%", height: "auto", display: "block", marginTop: 8 }} role="img" aria-label="total de T1 por dia com eventos de criação e remoção">
+        {[0, .5, 1].map((f) => { const v = lo + (hi - lo) * f; return <g key={f}><line x1={40} x2={W - 16} y1={y(v)} y2={y(v)} stroke="var(--hairline)" strokeDasharray="2 3" /><text x={36} y={y(v) + 3} textAnchor="end" style={{ font: "500 9px var(--font-mono)", fill: "var(--text-faint)" }}>{fmt(Math.round(v))}</text></g>; })}
+        {opDentro && <><line x1={40} x2={W - 16} y1={y(op)} y2={y(op)} stroke="var(--cap-limit-op)" strokeDasharray="5 4" strokeWidth="1.3" /><text x={W - 16} y={y(op) - 4} textAnchor="end" style={{ font: "600 9.5px var(--font-mono)", fill: "var(--cap-limit-op)" }}>limite op · {fmt(op)}</text></>}
+        {!opDentro && <text x={W - 16} y={12} textAnchor="end" style={{ font: "600 9.5px var(--font-mono)", fill: "var(--cap-limit-op)" }}>limite op · {fmt(op)} ↑ (faltam {fmt(op - hist[hist.length - 1])})</text>}
+        <path d={path(hist)} fill="none" stroke="var(--action)" strokeWidth="2" />
+        <path d={path(proj, hist.length - 1)} fill="none" stroke="var(--action)" strokeWidth="1.6" strokeDasharray="6 5" opacity=".8" />
+        <line x1={x(hist.length - 1)} x2={x(hist.length - 1)} y1={10} y2={h - 22} stroke="var(--ink)" opacity=".4" />
+        <text x={x(hist.length - 1) + 4} y={h - 24} style={{ font: "500 9.5px var(--font-mono)", fill: "var(--text-muted)" }}>hoje</text>
+        {evs.map((e, k) => { const cx = x(e.i), cy = y(hist[e.i]), up = e.event === "created"; return (
+          <g key={k} onMouseEnter={() => setHov(e)} onMouseLeave={() => setHov(null)} style={{ cursor: "default" }}>
+            <circle cx={cx} cy={cy} r={9} fill="transparent" />
+            <path d={up ? `M${cx},${cy - 11} l5,8 h-10 z` : `M${cx},${cy + 11} l5,-8 h-10 z`} fill={up ? "var(--state-ok)" : "var(--state-crit)"} stroke="var(--surface)" strokeWidth="1.5" />
+            <title>{`${fmtD(e.quando)} · ${e.event} · ${e.t1_name} → ${e.parent_name}`}</title>
+          </g>); })}
+        <text x={40} y={h - 6} style={{ font: "500 9.5px var(--font-mono)", fill: "var(--text-faint)" }}>{fmtD(datas[0])}</text>
+        <text x={x(hist.length - 1)} y={h - 6} textAnchor="middle" style={{ font: "500 9.5px var(--font-mono)", fill: "var(--text-faint)" }}>{fmtD(datas[datas.length - 1])}</text>
+        <text x={W - 16} y={h - 6} textAnchor="end" style={{ font: "500 9.5px var(--font-mono)", fill: "var(--text-faint)" }}>+90 d</text>
+      </svg>
+      <div style={{ marginTop: 6, display: "flex", gap: 14, flexWrap: "wrap", fontSize: 10.5, fontFamily: "var(--font-mono)", color: "var(--text-muted)" }}>
+        <span style={{ color: "var(--state-ok)" }}>▲ created</span><span style={{ color: "var(--state-crit)" }}>▼ deleted</span><span>— observado · ‒ ‒ projetado</span>
+        <span style={{ marginLeft: "auto", color: "var(--ink)" }}>{hov ? `${fmtD(hov.quando)} · ${hov.event} · ${hov.t1_name} → ${hov.parent_name} (${hov.edge_cluster_name})` : " "}</span>
+      </div>
+    </Card>
+  );
+}
+
 function TresOlhos() {
   const [site, setSite] = useState("");
   const nsx = useNsxT1(site);
@@ -600,6 +763,12 @@ function TresOlhos() {
         )}
         <Chip m="OBS" s="nsx-collector → InfluxDB" />
       </div>
+      {n && <MapaSite site={n.site} t0={n.t0} vrf={n.vrf} />}
+      {nsx.sites.length > 0 && <MedidorParque sites={nsx.sites} sel={n ? n.site : ""} onSel={setSite} />}
+      {n && <TrajetoriaEventos site={n.site} hist={n.hist} datas={n.datas} proj={n.proj} op={n.op} eventos={n.eventos} days={n.days} conf={n.conf} />}
+      <details style={{ marginTop: 4 }}>
+        <summary style={{ cursor: "pointer", font: "600 10.5px var(--font-ui)", letterSpacing: ".14em", textTransform: "uppercase", color: "var(--text-muted)" }}>versão anterior (trajetória simples + barras)</summary>
+        <div style={{ display: "grid", gap: 14, marginTop: 10 }}>
       <Card mock={!n}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 8 }}>
           <span style={{ font: "600 14px var(--font-ui)", color: "var(--petrol-900)" }}>{r.name}</span>
@@ -614,6 +783,8 @@ function TresOlhos() {
           <T1Bars rows={n.vrf} nameKey="vrf_name" title={`T1 por VRF · ${n.site}`} />
         </div>
       )}
+        </div>
+      </details>
     </div>
   );
 }
