@@ -823,6 +823,32 @@ function projetarBruno(p, atual, inicioYM) {
   }
   return { linhas, esgotouEm };
 }
+
+/* Criados por mês no edge produtivo — barras de uma série, mês corrente = parcial. */
+function CriadosPorMes({ linhas, fonte, media }) {
+  const hoje = new Date(); const corrente = `${hoje.getFullYear()}-${String(hoje.getMonth() + 1).padStart(2, "0")}`;
+  const data = linhas.map((l) => ({ k: fmtYM(l.mes), n: l.criados, d: l.removidos || 0, parcial: l.mes === corrente }));
+  return (
+    <div style={{ marginTop: 10 }}>
+      <div style={{ display: "flex", justifyContent: "space-between" }}><Cap>T1 criados por mês · {fonte === "criacao" ? "creation time da Manager" : "eventos do collector"}</Cap><Chip m="OBS" s={`média 3 m = ${media}/mês`} /></div>
+      <div style={{ height: 170, marginTop: 8 }}>
+        <ResponsiveContainer>
+          <BarChart data={data} margin={{ left: 4, right: 8, top: 18, bottom: 0 }}>
+            <CartesianGrid vertical={false} stroke="var(--hairline)" />
+            <XAxis dataKey="k" tick={{ fontSize: 10, fontFamily: "var(--font-mono)" }} stroke="var(--text-faint)" interval={0} angle={data.length > 12 ? -35 : 0} textAnchor={data.length > 12 ? "end" : "middle"} height={data.length > 12 ? 40 : 24} />
+            <YAxis allowDecimals={false} tick={{ fontSize: 10, fontFamily: "var(--font-mono)" }} stroke="var(--text-faint)" width={36} />
+            <Tooltip cursor={{ fill: "var(--selection)" }} contentStyle={{ fontFamily: "var(--font-mono)", fontSize: 11, border: "1px solid var(--hairline)", borderRadius: 6, background: "var(--surface)", color: "var(--ink)" }} formatter={(v, _n, it) => [`${v} criados${it.payload.d ? ` · ${it.payload.d} removidos` : ""}${it.payload.parcial ? " (mês parcial)" : ""}`, ""]} />
+            <Bar dataKey="n" radius={[3, 3, 0, 0]}>
+              {data.map((r, i) => <Cell key={i} fill={r.parcial ? "var(--petrol-200, #A9D3E0)" : "var(--action)"} />)}
+              <LabelList dataKey="n" position="top" style={{ fontFamily: "var(--font-mono)", fontSize: 9.5, fill: "var(--ink)" }} />
+            </Bar>
+          </BarChart>
+        </ResponsiveContainer>
+      </div>
+    </div>
+  );
+}
+
 function ProjecaoT1({ sites }) {
   const [p, setP] = useState(() => { try { return { ...PROJ_DEFAULT, ...JSON.parse(localStorage.getItem(LS_PROJ) || "{}") }; } catch { return PROJ_DEFAULT; } });
   const [rodou, setRodou] = useState(null);
@@ -830,15 +856,19 @@ function ProjecaoT1({ sites }) {
   const prod = sites.find((s) => s.site === EDGE_PRODUTIVO);
   const atual = prod?.total ?? 0;
   React.useEffect(() => {
-    Promise.all([api(`/nsx/t1/historico?site=${EDGE_PRODUTIVO}&dias=120`), api(`/nsx/t1/eventos?site=${EDGE_PRODUTIVO}&dias=120`)]).then(([h, ev]) => {
-      const pts = h.filter((x) => x.total != null);
-      if (pts.length < 2) return;
-      const d0 = new Date(pts[0].quando), d1 = new Date(pts[pts.length - 1].quando), dias = Math.max(1, (d1 - d0) / 864e5);
-      const porMes = Math.round(((pts[pts.length - 1].total - pts[0].total) / dias) * 30.4);
-      const meses = {};
-      ev.forEach((e) => { const k = e.quando.slice(0, 7); meses[k] = meses[k] || { c: 0, d: 0 }; meses[k][e.event === "created" ? "c" : "d"]++; });
-      setObs({ porMes, dias: Math.round(dias), de: pts[0].quando.slice(0, 10), ate: pts[pts.length - 1].quando.slice(0, 10), t0: pts[0].total, t1: pts[pts.length - 1].total, meses });
-    }).catch(() => setObs(null));
+    api(`/nsx/t1/crescimento?site=${EDGE_PRODUTIVO}`).then((c) => {
+      setObs({ fonte: "criacao", porMes: Math.round(c.media_criados_3m || 0), mesesMedia: c.meses_fechados_na_media, snapshot: c.snapshot, snapshots: c.snapshots, primeiro: c.primeiro_t1, total: c.total_t1, sumiram: c.sumiram_desde_snapshot_anterior, porMesLista: c.por_mes });
+    }).catch(() => {
+      // sem snapshot de criação: delta do Influx (retenção curta)
+      Promise.all([api(`/nsx/t1/historico?site=${EDGE_PRODUTIVO}&dias=120`), api(`/nsx/t1/eventos?site=${EDGE_PRODUTIVO}&dias=120`)]).then(([h, ev]) => {
+        const pts = h.filter((x) => x.total != null);
+        if (pts.length < 2) return;
+        const d0 = new Date(pts[0].quando), d1 = new Date(pts[pts.length - 1].quando), dias = Math.max(1, (d1 - d0) / 864e5);
+        const meses = {};
+        ev.forEach((e) => { const k = e.quando.slice(0, 7); meses[k] = meses[k] || { criados: 0, removidos: 0 }; meses[k][e.event === "created" ? "criados" : "removidos"]++; });
+        setObs({ fonte: "influx", porMes: Math.round(((pts[pts.length - 1].total - pts[0].total) / dias) * 30.4), dias: Math.round(dias), de: pts[0].quando.slice(0, 10), t0: pts[0].total, t1: pts[pts.length - 1].total, porMesLista: Object.keys(meses).sort().map((k) => ({ mes: k, ...meses[k] })) });
+      }).catch(() => setObs(null));
+    });
   }, []);
   const hoje = new Date(); const inicioYM = `${hoje.getFullYear()}-${String(hoje.getMonth() + 1).padStart(2, "0")}`;
   const set = (k, v) => setP((o) => ({ ...o, [k]: v }));
@@ -854,13 +884,17 @@ function ProjecaoT1({ sites }) {
           <Cap>projeção — parte do edge produtivo ({EDGE_PRODUTIVO})</Cap>
           <span style={{ display: "inline-flex", gap: 6 }}><Chip m="OBS" s={`${EDGE_PRODUTIVO} hoje = ${fmt(atual)} T1`} /><Chip m="MAN" s="premissas da planilha Capacity 2k29" /></span>
         </div>
-        {obs && <div style={{ marginTop: 8, fontSize: 11.5, color: "var(--text-muted)", fontFamily: "var(--font-mono)" }}>
-          eventos observados no {EDGE_PRODUTIVO}: {Object.keys(obs.meses).sort().map((k) => `${fmtYM(k)} +${obs.meses[k].c}${obs.meses[k].d ? ` −${obs.meses[k].d}` : ""}`).join(" · ")} · histórico no Influx começa em {obs.de} (retenção)
+        {obs && obs.fonte === "criacao" && <div style={{ marginTop: 8, fontSize: 11.5, color: "var(--text-muted)", fontFamily: "var(--font-mono)" }}>
+          {EDGE_PRODUTIVO}: {fmt(obs.total)} T1 · primeiro T1 em {obs.primeiro?.slice(0, 10)} · snapshot {obs.snapshot?.slice(0, 16).replace("T", " ")} ({obs.snapshots} snapshot{obs.snapshots > 1 ? "s" : ""}{obs.sumiram ? ` · ${obs.sumiram} sumiram desde o anterior` : ""}) · atualizar: <code>scripts/nsx_t1capacity.py --site {EDGE_PRODUTIVO} --criacao</code>
         </div>}
+        {obs && obs.fonte === "influx" && <div style={{ marginTop: 8, fontSize: 11.5, color: "var(--state-warn)", fontFamily: "var(--font-mono)" }}>
+          sem snapshot de criação — usando o Influx (histórico desde {obs.de}). Rode <code>scripts/nsx_t1capacity.py --site {EDGE_PRODUTIVO} --criacao</code> para o histórico completo.
+        </div>}
+        {obs && obs.porMesLista?.length > 0 && <CriadosPorMes linhas={obs.porMesLista} fonte={obs.fonte} media={obs.porMes} />}
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))", gap: "10px 18px", marginTop: 12, fontSize: 12 }}>
           <label>crescimento/mês (baseline dez–mai) <In k="fase1" />
             {obs && <div style={{ marginTop: 4, display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
-              <Chip m="OBS" s={`observado ${obs.porMes}/mês · ${fmt(obs.t0)}→${fmt(obs.t1)} em ${obs.dias} d`} />
+              <Chip m="OBS" s={obs.fonte === "criacao" ? `observado ${obs.porMes}/mês · média ${obs.mesesMedia.map(fmtYM).join(", ")} · creation time NSX` : `observado ${obs.porMes}/mês · ${fmt(obs.t0)}→${fmt(obs.t1)} em ${obs.dias} d (Influx)`} />
               <Btn sec onClick={() => setP((o) => ({ ...o, fase1: obs.porMes, mi: 0 }))} style={{ padding: "3px 8px", fontSize: 11 }}>usar observado</Btn>
             </div>}
           </label>
