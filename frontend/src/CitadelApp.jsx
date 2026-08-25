@@ -825,8 +825,20 @@ function projetarBruno(p, atual, inicioYM) {
 function ProjecaoT1({ sites }) {
   const [p, setP] = useState(() => { try { return { ...PROJ_DEFAULT, ...JSON.parse(localStorage.getItem(LS_PROJ) || "{}") }; } catch { return PROJ_DEFAULT; } });
   const [rodou, setRodou] = useState(null);
+  const [obs, setObs] = useState(null); // crescimento observado no Influx (OBS)
   const prod = sites.find((s) => s.site === EDGE_PRODUTIVO);
   const atual = prod?.total ?? 0;
+  React.useEffect(() => {
+    Promise.all([api(`/nsx/t1/historico?site=${EDGE_PRODUTIVO}&dias=120`), api(`/nsx/t1/eventos?site=${EDGE_PRODUTIVO}&dias=120`)]).then(([h, ev]) => {
+      const pts = h.filter((x) => x.total != null);
+      if (pts.length < 2) return;
+      const d0 = new Date(pts[0].quando), d1 = new Date(pts[pts.length - 1].quando), dias = Math.max(1, (d1 - d0) / 864e5);
+      const porMes = Math.round(((pts[pts.length - 1].total - pts[0].total) / dias) * 30.4);
+      const meses = {};
+      ev.forEach((e) => { const k = e.quando.slice(0, 7); meses[k] = meses[k] || { c: 0, d: 0 }; meses[k][e.event === "created" ? "c" : "d"]++; });
+      setObs({ porMes, dias: Math.round(dias), de: pts[0].quando.slice(0, 10), ate: pts[pts.length - 1].quando.slice(0, 10), t0: pts[0].total, t1: pts[pts.length - 1].total, meses });
+    }).catch(() => setObs(null));
+  }, []);
   const hoje = new Date(); const inicioYM = `${hoje.getFullYear()}-${String(hoje.getMonth() + 1).padStart(2, "0")}`;
   const set = (k, v) => setP((o) => ({ ...o, [k]: v }));
   const setExtra = (i, k, v) => setP((o) => ({ ...o, extras: o.extras.map((e, j) => j === i ? { ...e, [k]: v } : e) }));
@@ -841,8 +853,16 @@ function ProjecaoT1({ sites }) {
           <Cap>projeção — parte do edge produtivo ({EDGE_PRODUTIVO})</Cap>
           <span style={{ display: "inline-flex", gap: 6 }}><Chip m="OBS" s={`${EDGE_PRODUTIVO} hoje = ${fmt(atual)} T1`} /><Chip m="MAN" s="premissas da planilha Capacity 2k29" /></span>
         </div>
+        {obs && <div style={{ marginTop: 8, fontSize: 11.5, color: "var(--text-muted)", fontFamily: "var(--font-mono)" }}>
+          eventos observados no {EDGE_PRODUTIVO}: {Object.keys(obs.meses).sort().map((k) => `${fmtYM(k)} +${obs.meses[k].c}${obs.meses[k].d ? ` −${obs.meses[k].d}` : ""}`).join(" · ")} · histórico no Influx começa em {obs.de} (retenção)
+        </div>}
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))", gap: "10px 18px", marginTop: 12, fontSize: 12 }}>
-          <label>crescimento/mês (baseline dez–mai) <In k="fase1" /></label>
+          <label>crescimento/mês (baseline dez–mai) <In k="fase1" />
+            {obs && <div style={{ marginTop: 4, display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+              <Chip m="OBS" s={`observado ${obs.porMes}/mês · ${fmt(obs.t0)}→${fmt(obs.t1)} em ${obs.dias} d`} />
+              <Btn sec onClick={() => setP((o) => ({ ...o, fase1: obs.porMes, mi: 0 }))} style={{ padding: "3px 8px", fontSize: 11 }}>usar observado</Btn>
+            </div>}
+          </label>
           <label>MI/mês (clientes até fim de 2026) <In k="mi" /></label>
           <label>fase 1 vale até <In k="fase1Ate" type="month" w={130} /></label>
           <label>crescimento/mês depois (baseline 2k27) <In k="fase2" /></label>
