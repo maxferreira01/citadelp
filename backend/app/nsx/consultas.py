@@ -257,7 +257,8 @@ class Consultas:
         out: list[dict] = []
         for s_ in sites:
             total_edge = resumos[s_].total if s_ in resumos else None
-            for t in self.por_t0(s_):
+            # agrupado por T0 em ordem natural (Cluster_1, Cluster_2, …), não por uso
+            for t in sorted(self.por_t0(s_), key=lambda t: _natural(t.t0_name)):
                 dia, mes, ano = _dma(t.atualizado_em)
                 out.append(
                     {
@@ -274,7 +275,7 @@ class Consultas:
                         "total_edge": total_edge,
                     }
                 )
-                for v in self.por_vrf(s_):
+                for v in sorted(self.por_vrf(s_), key=lambda v: _natural(v.vrf_name)):
                     if v.t0_parent != t.t0_name:
                         continue
                     dia, mes, ano = _dma(v.atualizado_em)
@@ -313,6 +314,13 @@ class Consultas:
                     }
                 )
         return out
+
+
+def _natural(nome: str) -> list:
+    """Chave de ordenação natural: 'T0-Cluster_10' depois de 'T0-Cluster_2'."""
+    import re as _re
+
+    return [int(x) if x.isdigit() else x.lower() for x in _re.split(r"(\d+)", nome)]
 
 
 def _pai(t0_parent: str | None, vrf_name: str, nomes_t0: list[str]) -> tuple[str, bool]:

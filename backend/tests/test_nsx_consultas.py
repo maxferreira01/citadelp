@@ -126,7 +126,8 @@ def test_por_t0_e_a_uniao_direto_mais_vrfs():
     assert vrfs["T0-Cluster_1-vrf_1"].parent_inferido is False
     assert vrfs["T0-Cluster_9_X"].t0_parent == "-"  # T0 não existe no site: fica solto
     assert linhas[1].t1_count == 34 and linhas[1].t1_via_vrf == 0
-    assert (c1.limit, c1.usage_pct, c1.available) == (600, 134.67, 0)  # 600/T0, não o 1000 do collector
+    # 600/T0 (premissa), não o 1000 do collector
+    assert (c1.limit, c1.usage_pct, c1.available) == (600, 134.67, 0)
     assert c1.atualizado_em == "2026-08-25T18:38:12Z"
 
 
