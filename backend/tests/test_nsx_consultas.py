@@ -90,7 +90,8 @@ def test_resumo_junta_totals_e_capacity_normalizando_site():
     assert r.site == "TESP6" and r.variantes == ["TESP06", "TESP6"]
     assert (r.total, r.on_vrf, r.on_t0) == (1842, 1207, 635)
     assert (r.nsx_current, r.nsx_max, r.nsx_pct) == (1842, 4000, 46.05)
-    assert "bucket: \\\"nsx\\\"" in chamadas[0] and "nsx_capacity" in chamadas[1]  # totals no bucket default
+    # totals vem do bucket default do collector, o resto de nsx_capacity
+    assert "bucket: \\\"nsx\\\"" in chamadas[0] and "nsx_capacity" in chamadas[1]
 
 
 def test_por_t0_converte_tipos_do_pivot():
