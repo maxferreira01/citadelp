@@ -26,6 +26,7 @@ JANELA_ULTIMO = "-15m"  # 3 ciclos de capacity (intervals.slow = 5m)
 # O limit de 1000 que o collector grava em nsx_t1_per_t0 vale só para os diretos.
 T0_T1_LIMIT = 600
 VRF_T1_LIMIT = 200  # premissa por VRF (o collector grava o mesmo valor em nsx_t1_per_vrf.limit)
+T0_DIRECT_T1_LIMIT = 200  # T1 pendurados direto no T0 têm o mesmo teto de uma VRF
 
 
 def _i(v: Any) -> int | None:
@@ -266,7 +267,7 @@ class Consultas:
                         "node": t.t0_name,
                         "limite_node": T0_T1_LIMIT,
                         "vrf": "(direto no T0)",
-                        "limite_vrf": None,
+                        "limite_vrf": T0_DIRECT_T1_LIMIT,
                         "dia": dia,
                         "mes": mes,
                         "ano": ano,

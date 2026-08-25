@@ -41,6 +41,7 @@ class T1PorT0:
     t0_id: str = ""
     t1_count: int = 0
     t1_direct: int = 0
+    t1_direct_limit: int = 200  # mesmo teto de uma VRF
     t1_via_vrf: int = 0
     limit: int = 0
     usage_pct: float = 0.0

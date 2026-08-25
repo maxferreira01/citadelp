@@ -607,7 +607,7 @@ function MapaSite({ site, t0, vrf }) {
     <Card>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", flexWrap: "wrap", gap: 8 }}>
         <Cap>1 · mapa do site — T1 por par de edges (T0) e por VRF · {site}</Cap>
-        <span style={{ display: "inline-flex", gap: 6 }}><Chip m="OBS" s="per_t0 + per_vrf" /><Chip m="MAN" s="600/T0 · 200/VRF" /></span>
+        <span style={{ display: "inline-flex", gap: 6 }}><Chip m="OBS" s="per_t0 + per_vrf" /><Chip m="MAN" s="600/T0 = 200 direto + 200/VRF" /></span>
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(230px, 1fr))", gap: 12, marginTop: 12 }}>
         {porT0.map((t) => { const st = stT1(t.usage_pct); return (
@@ -618,7 +618,16 @@ function MapaSite({ site, t0, vrf }) {
             </div>
             <Segs t={t} />
             <div style={{ display: "grid", gap: 5, marginTop: 10 }}>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr auto", fontSize: 11, fontFamily: "var(--font-mono)", color: "var(--text-muted)" }}><span>direto no T0</span><span className="num">{t.t1_direct}</span></div>
+              {(() => { const pd = t.t1_direct / VRF_LIMIT; return (
+                <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 8, alignItems: "center", fontSize: 11, fontFamily: "var(--font-mono)" }}>
+                  <div>
+                    <div style={{ display: "flex", justifyContent: "space-between", color: "var(--text-muted)" }}><span>direto no T0</span><span className="num">{t.t1_direct}/{VRF_LIMIT}</span></div>
+                    <div style={{ position: "relative", height: 6, background: "var(--surface-sunken)", borderRadius: 3, marginTop: 2 }}>
+                      <div title={`direto no T0: ${t.t1_direct}/${VRF_LIMIT}`} style={{ position: "absolute", inset: "0 auto 0 0", width: `${Math.min(100, pd * 100)}%`, background: PILHA[0], borderRadius: 3 }} />
+                    </div>
+                  </div>
+                  <span aria-hidden style={{ color: SCOLOR[stT1(pd * 100)] }}>{GLYPH[stT1(pd * 100)]}</span>
+                </div>); })()}
               {t.vrfs.map((v, i) => { const pv = v.t1_count / VRF_LIMIT; return (
                 <div key={v.vrf_name} style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 8, alignItems: "center", fontSize: 11, fontFamily: "var(--font-mono)" }}>
                   <div>
@@ -771,7 +780,7 @@ function TabelaT1({ site }) {
           </tr></thead>
           <tbody>{(rows || []).map((r, i) => {
             const direto = r.vrf === "(direto no T0)";
-            const pct = r.limite_vrf ? r.qtd / r.limite_vrf : r.limite_node ? r.qtd_node / r.limite_node : 0;
+            const pct = r.limite_vrf ? r.qtd / r.limite_vrf : 0;
             const st = stT1(pct * 100);
             return (
               <tr key={i} style={{ borderBottom: "1px solid var(--hairline)", background: direto ? "var(--surface-sunken)" : "transparent" }}>
@@ -790,7 +799,7 @@ function TabelaT1({ site }) {
         </table>
       </div>
       {rows && rows.length === 0 && <div style={{ padding: 18, color: "var(--text-muted)" }}>sem linhas</div>}
-      <div style={{ padding: "10px 18px 14px", fontSize: 11, color: "var(--text-muted)", fontFamily: "var(--font-mono)" }}>Node = T0 (par de edges) · linha sombreada = T1 pendurados direto no T0 · Dia/Mes/Ano = data do último ponto do collector</div>
+      <div style={{ padding: "10px 18px 14px", fontSize: 11, color: "var(--text-muted)", fontFamily: "var(--font-mono)" }}>Node = T0 (par de edges, 600) · linha sombreada = T1 pendurados direto no T0 (limite 200, como uma VRF) · Dia/Mes/Ano = data do último ponto do collector</div>
     </Card>
   );
 }
