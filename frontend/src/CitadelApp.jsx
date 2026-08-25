@@ -332,11 +332,11 @@ function useNsxT1(site) {
         ]);
         if (!vivo) return;
         const serie = hist.map((h) => h.total).filter((v) => v != null);
-        const tech = alvo.nsx_max || 4000, op = NSX_T1_OP_LIMIT;
+        const op = NSX_T1_OP_LIMIT;
         const usage = alvo.total ?? alvo.nsx_current ?? 0;
         const { proj, days, conf } = projetar(serie, op);
         const st = usage >= op ? "crit" : usage >= op * 0.85 ? "warn" : "ok";
-        setData({ id: "nsxt1", name: `NSX T1 Gateways · ${alvo.site}`, site: alvo.site, usage, op, tech, days, conf, st, hist: serie, proj, t0, vrf, resumo: alvo });
+        setData({ id: "nsxt1", name: `NSX T1 Gateways · ${alvo.site}`, site: alvo.site, usage, op, tech: null, days, conf, st, hist: serie, proj, t0, vrf, resumo: alvo });
       } catch (e) { if (vivo) setErr(String(e.message || e)); }
       if (vivo) setBusy(false);
     })();
@@ -374,7 +374,7 @@ function T1Bars({ rows, nameKey, title }) {
 /* Trajetória — sólida=observado · tracejada=projetado · âmbar=limite op.     */
 function Trajectory({ hist, proj, op, tech, h = 150 }) {
   if (!hist.length) return <div style={{ height: h, display: "grid", placeItems: "center", color: "var(--state-nocollect)", border: "1px dotted var(--state-nocollect)", borderRadius: 6, fontFamily: "var(--font-mono)", fontSize: 12 }}>◌ sem coleta</div>;
-  const all = [...hist, ...proj, op, tech];
+  const all = [...hist, ...proj, op, ...(tech != null ? [tech] : [])];
   const min = Math.min(...all) * 0.96, max = Math.max(...all) * 1.03;
   const W = 640, n = hist.length + proj.length - 1;
   const x = (i) => 34 + (i * (W - 50)) / n;
@@ -385,8 +385,8 @@ function Trajectory({ hist, proj, op, tech, h = 150 }) {
     <svg viewBox={`0 0 ${W} ${h}`} style={{ width: "100%", height: "auto", display: "block" }} role="img" aria-label="trajetória do recurso: histórico sólido, projeção tracejada, limites operacional e técnico">
       <line x1={34} x2={W - 12} y1={y(op)} y2={y(op)} stroke="var(--cap-limit-op)" strokeDasharray="5 4" strokeWidth="1.3" />
       <text x={W - 12} y={y(op) - 4} textAnchor="end" style={{ font: "600 9.5px var(--font-mono)", fill: "var(--cap-limit-op)" }}>limite op · {fmt(op)}</text>
-      <line x1={34} x2={W - 12} y1={y(tech)} y2={y(tech)} stroke="var(--cap-limit-tech)" strokeWidth="1.3" />
-      <text x={W - 12} y={y(tech) - 4} textAnchor="end" style={{ font: "600 9.5px var(--font-mono)", fill: "var(--cap-limit-tech)" }}>limite téc · {fmt(tech)}</text>
+      {tech != null && <line x1={34} x2={W - 12} y1={y(tech)} y2={y(tech)} stroke="var(--cap-limit-tech)" strokeWidth="1.3" />}
+      {tech != null && <text x={W - 12} y={y(tech) - 4} textAnchor="end" style={{ font: "600 9.5px var(--font-mono)", fill: "var(--cap-limit-tech)" }}>limite téc · {fmt(tech)}</text>}
       <line x1={nowX} x2={nowX} y1={8} y2={h - 16} stroke="var(--ink)" strokeWidth="1" opacity=".55" />
       <text x={nowX + 4} y={16} style={{ font: "500 9.5px var(--font-mono)", fill: "var(--text-muted)" }}>hoje</text>
       <path d={path(hist)} fill="none" stroke="var(--action)" strokeWidth="2" />
@@ -579,7 +579,7 @@ function TresOlhos() {
   const [site, setSite] = useState("");
   const nsx = useNsxT1(site);
   const n = nsx.data;
-  const r = n || { id: "nsxt1", name: "NSX T1 Gateways", hist: [], proj: [], op: 3200, tech: 4000, days: null, conf: "—" };
+  const r = n || { id: "nsxt1", name: "NSX T1 Gateways", hist: [], proj: [], op: NSX_T1_OP_LIMIT, tech: null, days: null, conf: "—" };
   const alerta = n && n.days != null && n.days <= 180;
   return (
     <div style={{ display: "grid", gap: 14 }}>
@@ -590,7 +590,7 @@ function TresOlhos() {
             : !n ? <div style={{ fontSize: 13.5, fontWeight: 600 }}>{nsx.busy ? "carregando capacity de T1…" : "◌ sem coleta de T1"}</div>
             : <>
               <div style={{ fontSize: 13.5, fontWeight: 600 }}>{n.days != null ? `NSX T1 pode atingir o limite operacional em ${n.days} dias.` : "NSX T1 sem tendência de esgotamento no horizonte projetado."}</div>
-              <div style={{ fontSize: 11.5, color: "var(--text-muted)", marginTop: 2 }}>{n.site} · {fmt(n.usage)} de {fmt(n.op)} T1 (limite 2k/DC · config-max {fmt(n.tech)}) · projeção 90 d, confiança {n.conf}</div>
+              <div style={{ fontSize: 11.5, color: "var(--text-muted)", marginTop: 2 }}>{n.site} · {fmt(n.usage)} de {fmt(n.op)} T1 (limite 2k/DC) · projeção 90 d, confiança {n.conf}</div>
             </>}
         </div>
         {nsx.sites.length > 1 && (
@@ -697,7 +697,7 @@ function Muralha() {
   const [nsx, setNsx] = useState([]);
   const [err, setErr] = useState("");
   React.useEffect(() => { api("/nsx/t1/resumo").then(setNsx).catch((e) => setErr(String(e.message || e))); }, []);
-  const linhasNsx = nsx.map((r) => ({ plat: "NSX-T", res: "Tier-1 Routers", edge: r.site, use: r.total ?? r.nsx_current ?? 0, op: NSX_T1_OP_LIMIT, vendor: r.nsx_max || 4000, src: "premissa arquitetura · 2k/DC" }));
+  const linhasNsx = nsx.map((r) => ({ plat: "NSX-T", res: "Tier-1 Routers", edge: r.site, use: r.total ?? r.nsx_current ?? 0, op: NSX_T1_OP_LIMIT, vendor: null, src: "premissa arquitetura · 2k/DC" }));
   const linhas = [...linhasNsx, ...LIMITS];
   return (
     <Card mock style={{ padding: 0, overflow: "hidden" }}>
@@ -722,7 +722,7 @@ function Muralha() {
               <td className="num" style={{ padding: "8px 14px" }}>{l.edge}</td>
               <td className="num" style={{ padding: "8px 14px", textAlign: "right" }}>{fmt(l.use)}</td>
               <td className="num" style={{ padding: "8px 14px", textAlign: "right", color: "var(--cap-limit-op)" }}>{fmt(l.op)}</td>
-              <td className="num" style={{ padding: "8px 14px", textAlign: "right" }}>{fmt(l.vendor)}</td>
+              <td className="num" style={{ padding: "8px 14px", textAlign: "right" }}>{l.vendor != null ? fmt(l.vendor) : "—"}</td>
               <td className="num" style={{ padding: "8px 14px", textAlign: "right" }}><St st={st} label={slack + " %"} /></td>
               <td style={{ padding: "8px 14px", fontSize: 11.5, color: "var(--text-muted)" }}>{l.src}</td>
             </tr>
