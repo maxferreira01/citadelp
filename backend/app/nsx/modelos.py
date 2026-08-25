@@ -57,6 +57,7 @@ class T1PorVrf:
     vrf_name: str
     vrf_id: str = ""
     t0_parent: str = ""
+    parent_inferido: bool = False  # pai deduzido pelo nome (collector gravou "-")
     t1_count: int = 0
     limit: int = 0
     usage_pct: float = 0.0

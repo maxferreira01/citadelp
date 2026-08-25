@@ -66,6 +66,17 @@ PR, renomear/duplicar `vrf_name` → `parent_name` (manter `vrf_name` por
 compatibilidade com o t1-slack-bot até ele ser ajustado). O citadel já expõe
 o campo como `parent_name` em `EventoT1`.
 
+## 4b. `t0_parent` de VRF fora do padrão de nome
+
+`capacity.go:181` deduz o T0 pai da VRF pelo sufixo `-vrf_` no display name.
+VRFs como `T0-Cluster_1_FG3`, `T0-Cluster_1_PA2` (TECE) e
+`T0-Cluster_1-Tenant_Shared-1` (TESP6/TECE) saem com `t0_parent = "-"`, e o
+T1 por par de edges fica subcontado (TECE Cluster_1: 211 gravados × 546 reais).
+Usar o campo da API — `vrf_config.tier0_path` do gateway VRF
+(`/policy/api/v1/infra/tier-0s`) — e cair na heurística só se ele faltar. O
+citadel infere pelo prefixo do nome enquanto isso (`consultas._pai`, marcado
+`parent_inferido`), confirmado no TECE pelo `nsx_ha_state`.
+
 ## 5. Colaterais observados (não são bugs do collector)
 
 - 6 de 8 VRFs do TESP6 a ≥ 99,5 % de `vrf_t1_limit_default: 200`. Se 200/VRF é

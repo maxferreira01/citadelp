@@ -622,7 +622,7 @@ function MapaSite({ site, t0, vrf }) {
               {t.vrfs.map((v, i) => { const pv = v.t1_count / VRF_LIMIT; return (
                 <div key={v.vrf_name} style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 8, alignItems: "center", fontSize: 11, fontFamily: "var(--font-mono)" }}>
                   <div>
-                    <div style={{ display: "flex", justifyContent: "space-between", color: "var(--text-muted)" }}><span>{v.vrf_name.replace(t.t0_name + "-", "")}</span><span className="num">{v.t1_count}/{VRF_LIMIT}</span></div>
+                    <div style={{ display: "flex", justifyContent: "space-between", color: "var(--text-muted)" }}><span title={v.parent_inferido ? "T0 pai inferido pelo nome (collector gravou '-')" : undefined}>{v.vrf_name.replace(t.t0_name + "-", "").replace(t.t0_name + "_", "")}{v.parent_inferido ? " ˙" : ""}</span><span className="num">{v.t1_count}/{VRF_LIMIT}</span></div>
                     <div style={{ position: "relative", height: 6, background: "var(--surface-sunken)", borderRadius: 3, marginTop: 2 }}>
                       <div title={`${v.vrf_name}: ${v.t1_count}/${VRF_LIMIT}`} style={{ position: "absolute", inset: "0 auto 0 0", width: `${Math.min(100, pv * 100)}%`, background: PILHA[Math.min(i + 1, PILHA.length - 1)], borderRadius: 3 }} />
                     </div>
@@ -634,7 +634,7 @@ function MapaSite({ site, t0, vrf }) {
         {soltas.length > 0 && (
           <div style={{ border: "1px dashed var(--hairline)", borderRadius: 6, padding: "10px 12px", fontSize: 11, fontFamily: "var(--font-mono)", color: "var(--text-muted)" }}>
             <div style={{ font: "600 12.5px var(--font-ui)", color: "var(--ink)" }}>VRFs sem T0 resolvido</div>
-            <div style={{ marginTop: 4 }}>o collector gravou t0_parent = "-"</div>
+            <div style={{ marginTop: 4 }}>o collector gravou t0_parent = "-" e o nome não bate com nenhum T0 do site</div>
             {soltas.map((v) => <div key={v.vrf_name} style={{ display: "flex", justifyContent: "space-between", marginTop: 6 }}><span>{v.vrf_name}</span><span className="num">{v.t1_count}/{VRF_LIMIT}</span></div>)}
           </div>
         )}
@@ -778,7 +778,7 @@ function TabelaT1({ site }) {
                 <td className="num" style={{ padding: "6px 14px" }}>{r.edge}</td>
                 <td style={{ padding: "6px 14px" }}>{r.node}</td>
                 <td className="num" style={{ padding: "6px 14px", textAlign: "right" }}>{r.limite_node ?? "—"}</td>
-                <td style={{ padding: "6px 14px", color: direto ? "var(--text-muted)" : "var(--ink)" }}>{r.vrf}</td>
+                <td style={{ padding: "6px 14px", color: direto ? "var(--text-muted)" : "var(--ink)" }}>{r.vrf}{r.parent_inferido && <span title="T0 pai inferido pelo nome — o collector gravou t0_parent = '-'" style={{ marginLeft: 6, font: "500 9.5px var(--font-mono)", color: "var(--state-warn)" }}>pai inferido</span>}</td>
                 <td className="num" style={{ padding: "6px 14px", textAlign: "right" }}>{r.limite_vrf ?? "—"}</td>
                 <td className="num" style={{ padding: "6px 14px", textAlign: "right" }}>{r.dia}</td>
                 <td className="num" style={{ padding: "6px 14px", textAlign: "right" }}>{r.mes}</td>

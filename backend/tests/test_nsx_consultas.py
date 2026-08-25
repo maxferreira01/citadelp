@@ -101,6 +101,8 @@ CSV_VRF = (
     ",result,table,site,vrf_name,vrf_id,t0_parent,_time,available,limit,t1_count,usage_pct\r\n"
     ",_result,0,TESP6,T0-Cluster_1-vrf_1,v1,T0-Cluster_1,2026-08-25T18:38:12Z,0,200,202,101\r\n"
     ",_result,0,TESP6,T0-Cluster_1-vrf_2,v2,T0-Cluster_1,2026-08-25T18:38:12Z,1,200,199,99.5\r\n"
+    ",_result,0,TESP6,T0-Cluster_1_FG3,v3,-,2026-08-25T18:38:12Z,0,200,204,102\r\n"
+    ",_result,0,TESP6,T0-Cluster_9_X,v4,-,2026-08-25T18:38:12Z,0,200,7,3.5\r\n"
     "\r\n"
 )
 
@@ -114,13 +116,17 @@ def test_por_t0_e_a_uniao_direto_mais_vrfs():
     linhas = q.por_t0("TESP6")
     assert [t.t0_name for t in linhas] == ["T0-Cluster_1", "T0-Cluster_4"]
     c1 = linhas[0]
-    assert (c1.t1_direct, c1.t1_via_vrf, c1.t1_count) == (203, 401, 604)
+    # FG3 vem com t0_parent "-" do collector: pai inferido pelo prefixo do nome
+    assert (c1.t1_direct, c1.t1_via_vrf, c1.t1_count) == (203, 605, 808)
+    vrfs = {v.vrf_name: v for v in q.por_vrf("TESP6")}
+    assert (
+        vrfs["T0-Cluster_1_FG3"].t0_parent == "T0-Cluster_1"
+        and vrfs["T0-Cluster_1_FG3"].parent_inferido
+    )
+    assert vrfs["T0-Cluster_1-vrf_1"].parent_inferido is False
+    assert vrfs["T0-Cluster_9_X"].t0_parent == "-"  # T0 não existe no site: fica solto
     assert linhas[1].t1_count == 34 and linhas[1].t1_via_vrf == 0
-    assert (c1.limit, c1.usage_pct, c1.available) == (
-        600,
-        100.67,
-        0,
-    )  # 600/T0, não o 1000 do collector
+    assert (c1.limit, c1.usage_pct, c1.available) == (600, 134.67, 0)  # 600/T0, não o 1000 do collector
     assert c1.atualizado_em == "2026-08-25T18:38:12Z"
 
 

@@ -173,11 +173,13 @@ class Consultas:
 
     def por_t0(self, site: str) -> list[T1PorT0]:
         """União por T0: diretos (nsx_t1_per_t0) + VRFs filhas (t0_parent)."""
+        linhas_t0 = self.c.query(flux_per_t0(self.b_cap, self.aliases, site))
+        nomes_t0 = [r.get("t0_name") or "" for r in linhas_t0]
         via_vrf: dict[str, int] = {}
-        for v in self.por_vrf(site):
+        for v in self.por_vrf(site, nomes_t0):
             via_vrf[v.t0_parent] = via_vrf.get(v.t0_parent, 0) + v.t1_count
         out = []
-        for r in self.c.query(flux_per_t0(self.b_cap, self.aliases, site)):
+        for r in linhas_t0:
             nome = r.get("t0_name") or ""
             direto = _i(r.get("t1_count")) or 0
             total = direto + via_vrf.get(nome, 0)
@@ -197,13 +199,25 @@ class Consultas:
             )
         return sorted(out, key=lambda t: -t.t1_count)
 
-    def por_vrf(self, site: str) -> list[T1PorVrf]:
+    def por_vrf(self, site: str, nomes_t0: list[str] | None = None) -> list[T1PorVrf]:
+        """``t0_parent`` vem do collector, que o deduz pelo sufixo ``-vrf_`` do nome
+        (capacity.go:181). VRFs fora do padrão (``T0-Cluster_1_FG3``,
+        ``T0-Cluster_1_PA2``, ``…-Tenant_Shared-1``) chegam com "-": aqui o pai é
+        inferido pelo prefixo do nome quando esse T0 existe no site, e a linha
+        fica marcada ``parent_inferido=True``. Confirmado no TECE pelo
+        nsx_ha_state (T1 filhos da FG3 no par do T0-Cluster_1)."""
+        if nomes_t0 is None:
+            nomes_t0 = [
+                r.get("t0_name") or ""
+                for r in self.c.query(flux_per_t0(self.b_cap, self.aliases, site))
+            ]
         return [
             T1PorVrf(
                 site=self.aliases.canonico(r["site"]),
                 vrf_name=r.get("vrf_name") or "",
                 vrf_id=r.get("vrf_id") or "",
-                t0_parent=r.get("t0_parent") or "",
+                t0_parent=_pai(r.get("t0_parent"), r.get("vrf_name") or "", nomes_t0)[0],
+                parent_inferido=_pai(r.get("t0_parent"), r.get("vrf_name") or "", nomes_t0)[1],
                 t1_count=_i(r.get("t1_count")) or 0,
                 limit=_i(r.get("limit")) or 0,
                 usage_pct=_f(r.get("usage_pct")) or 0.0,
@@ -299,6 +313,17 @@ class Consultas:
                     }
                 )
         return out
+
+
+def _pai(t0_parent: str | None, vrf_name: str, nomes_t0: list[str]) -> tuple[str, bool]:
+    """(pai, inferido). Pai do collector se veio; senão o T0 mais longo que é
+    prefixo do nome da VRF."""
+    if t0_parent and t0_parent != "-":
+        return t0_parent, False
+    candidatos = [n for n in nomes_t0 if n and vrf_name.startswith(n)]
+    if not candidatos:
+        return "-", False
+    return max(candidatos, key=len), True
 
 
 def _dma(iso: str | None) -> tuple[int | None, int | None, int | None]:
