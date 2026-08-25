@@ -345,8 +345,8 @@ function useNsxT1(site) {
   return { sites, data, busy, err };
 }
 /* Barras horizontais count/limit, cor por usage_pct (molde do ranking do Corvo). */
-function T1Bars({ rows, nameKey, title }) {
-  const data = rows.map((r) => ({ k: r[nameKey], n: r.t1_count, lim: r.limit, pct: r.usage_pct }));
+function T1Bars({ rows, nameKey, title, semLimite }) {
+  const data = rows.map((r) => ({ k: r[nameKey], n: r.t1_count, lim: semLimite ? null : r.limit, pct: semLimite ? 0 : r.usage_pct, direto: r.t1_direct, vrf: r.t1_via_vrf }));
   const cor = (pct) => pct >= 90 ? "var(--state-crit)" : pct >= 70 ? "var(--cap-limit-op)" : "var(--petrol-500)";
   return (
     <Card>
@@ -358,10 +358,10 @@ function T1Bars({ rows, nameKey, title }) {
               <CartesianGrid horizontal={false} stroke="var(--hairline)" />
               <XAxis type="number" allowDecimals={false} tick={{ fontSize: 10.5, fontFamily: "var(--font-mono)" }} stroke="var(--text-faint)" />
               <YAxis type="category" dataKey="k" width={170} tick={{ fontSize: 10.5, fontFamily: "var(--font-mono)" }} stroke="var(--text-faint)" />
-              <Tooltip cursor={{ fill: "var(--selection)" }} contentStyle={{ fontFamily: "var(--font-mono)", fontSize: 11, border: "1px solid var(--hairline)", borderRadius: 6, background: "var(--surface)", color: "var(--ink)" }} formatter={(v, _n, it) => [`${v} de ${it.payload.lim} (${it.payload.pct} %)`, "T1"]} />
+              <Tooltip cursor={{ fill: "var(--selection)" }} contentStyle={{ fontFamily: "var(--font-mono)", fontSize: 11, border: "1px solid var(--hairline)", borderRadius: 6, background: "var(--surface)", color: "var(--ink)" }} formatter={(v, _n, it) => [it.payload.lim != null ? `${v} de ${it.payload.lim} (${it.payload.pct} %)` : `${v} T1 · ${it.payload.direto} direto + ${it.payload.vrf} em VRF`, "T1"]} />
               <Bar dataKey="n" radius={[0, 3, 3, 0]}>
                 {data.map((r, i) => <Cell key={i} fill={cor(r.pct)} />)}
-                <LabelList dataKey="n" position="right" content={({ x, y, width, height, value, index }) => <text x={x + width + 4} y={y + height / 2 + 4} style={{ fontFamily: "var(--font-mono)", fontSize: 10.5, fill: "var(--ink)" }}>{value}/{data[index].lim}</text>} />
+                <LabelList dataKey="n" position="right" content={({ x, y, width, height, value, index }) => <text x={x + width + 4} y={y + height / 2 + 4} style={{ fontFamily: "var(--font-mono)", fontSize: 10.5, fill: "var(--ink)" }}>{data[index].lim != null ? `${value}/${data[index].lim}` : value}</text>} />
               </Bar>
             </BarChart>
           </ResponsiveContainer>
@@ -610,7 +610,7 @@ function TresOlhos() {
       </Card>
       {n && (
         <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) minmax(0,1fr)", gap: 14 }}>
-          <T1Bars rows={n.t0} nameKey="t0_name" title={`T1 por T0 · ${n.site}`} />
+          <T1Bars rows={n.t0} nameKey="t0_name" title={`T1 por T0 (par de edges · direto + VRFs) · ${n.site}`} semLimite />
           <T1Bars rows={n.vrf} nameKey="vrf_name" title={`T1 por VRF · ${n.site}`} />
         </div>
       )}

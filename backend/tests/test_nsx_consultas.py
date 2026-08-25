@@ -91,15 +91,32 @@ def test_resumo_junta_totals_e_capacity_normalizando_site():
     assert (r.total, r.on_vrf, r.on_t0) == (1842, 1207, 635)
     assert (r.nsx_current, r.nsx_max, r.nsx_pct) == (1842, 4000, 46.05)
     # totals vem do bucket default do collector, o resto de nsx_capacity
-    assert "bucket: \\\"nsx\\\"" in chamadas[0] and "nsx_capacity" in chamadas[1]
+    assert 'bucket: \\"nsx\\"' in chamadas[0] and "nsx_capacity" in chamadas[1]
 
 
-def test_por_t0_converte_tipos_do_pivot():
-    q = Consultas(_client(lambda req: httpx.Response(200, text=CSV_T0)), ALIASES)
+CSV_VRF = (
+    "#group,false,false,true,true,true,true,true,false,false,false,false\r\n"
+    "#datatype,string,long,string,string,string,string,dateTime:RFC3339,double,double,double,double\r\n"
+    "#default,_result,,,,,,,,,,\r\n"
+    ",result,table,site,vrf_name,vrf_id,t0_parent,_time,available,limit,t1_count,usage_pct\r\n"
+    ",_result,0,TESP6,T0-Cluster_1-vrf_1,v1,T0-Cluster_1,2026-08-25T18:38:12Z,0,200,202,101\r\n"
+    ",_result,0,TESP6,T0-Cluster_1-vrf_2,v2,T0-Cluster_1,2026-08-25T18:38:12Z,1,200,199,99.5\r\n"
+    "\r\n"
+)
+
+
+def test_por_t0_e_a_uniao_direto_mais_vrfs():
+    def handler(req: httpx.Request) -> httpx.Response:
+        flux = req.read().decode()
+        return httpx.Response(200, text=CSV_VRF if "nsx_t1_per_vrf" in flux else CSV_T0)
+
+    q = Consultas(_client(handler), ALIASES)
     linhas = q.por_t0("TESP6")
     assert [t.t0_name for t in linhas] == ["T0-Cluster_1", "T0-Cluster_4"]
-    assert linhas[1].t1_count == 34 and linhas[1].usage_pct == 3.4 and linhas[1].limit == 1000
-    assert linhas[0].atualizado_em == "2026-08-25T18:38:12Z"
+    c1 = linhas[0]
+    assert (c1.t1_direct, c1.t1_via_vrf, c1.t1_count) == (203, 401, 604)
+    assert linhas[1].t1_count == 34 and linhas[1].t1_via_vrf == 0 and linhas[1].limit == 1000
+    assert c1.atualizado_em == "2026-08-25T18:38:12Z"
 
 
 def test_influx_401_vira_nsxerror_com_status():

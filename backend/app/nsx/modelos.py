@@ -31,10 +31,17 @@ class ResumoSite:
 
 @dataclass(frozen=True)
 class T1PorT0:
+    """T1 por T0 = par de edge nodes. ``t1_count`` é a UNIÃO (direto no T0 +
+    nas VRFs filhas) — o collector grava só os diretos em ``nsx_t1_per_t0``;
+    ``t1_direct``/``t1_via_vrf`` guardam a quebra. ``limit`` é o do collector
+    para os diretos (t0_t1_limit_default), informativo."""
+
     site: str
     t0_name: str
     t0_id: str = ""
     t1_count: int = 0
+    t1_direct: int = 0
+    t1_via_vrf: int = 0
     limit: int = 0
     usage_pct: float = 0.0
     available: int = 0

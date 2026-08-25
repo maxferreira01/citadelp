@@ -167,19 +167,29 @@ class Consultas:
         return out
 
     def por_t0(self, site: str) -> list[T1PorT0]:
-        return [
-            T1PorT0(
-                site=self.aliases.canonico(r["site"]),
-                t0_name=r.get("t0_name") or "",
-                t0_id=r.get("t0_id") or "",
-                t1_count=_i(r.get("t1_count")) or 0,
-                limit=_i(r.get("limit")) or 0,
-                usage_pct=_f(r.get("usage_pct")) or 0.0,
-                available=_i(r.get("available")) or 0,
-                atualizado_em=r.get("_time"),
+        """União por T0: diretos (nsx_t1_per_t0) + VRFs filhas (t0_parent)."""
+        via_vrf: dict[str, int] = {}
+        for v in self.por_vrf(site):
+            via_vrf[v.t0_parent] = via_vrf.get(v.t0_parent, 0) + v.t1_count
+        out = []
+        for r in self.c.query(flux_per_t0(self.b_cap, self.aliases, site)):
+            nome = r.get("t0_name") or ""
+            direto = _i(r.get("t1_count")) or 0
+            out.append(
+                T1PorT0(
+                    site=self.aliases.canonico(r["site"]),
+                    t0_name=nome,
+                    t0_id=r.get("t0_id") or "",
+                    t1_count=direto + via_vrf.get(nome, 0),
+                    t1_direct=direto,
+                    t1_via_vrf=via_vrf.get(nome, 0),
+                    limit=_i(r.get("limit")) or 0,
+                    usage_pct=_f(r.get("usage_pct")) or 0.0,
+                    available=_i(r.get("available")) or 0,
+                    atualizado_em=r.get("_time"),
+                )
             )
-            for r in self.c.query(flux_per_t0(self.b_cap, self.aliases, site))
-        ]
+        return sorted(out, key=lambda t: -t.t1_count)
 
     def por_vrf(self, site: str) -> list[T1PorVrf]:
         return [
