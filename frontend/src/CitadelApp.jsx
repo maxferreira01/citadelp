@@ -137,7 +137,7 @@ const ACTIONS = [
 
 /* TRÊS OLHOS / MURALHA / DOMÍNIOS / TESOURO / ARQUIVO — EST · mock.          */
 const CAPACITY = [
-  { id: "nsxt1", name: "NSX T1 Gateways · TESP07", usage: 184, op: 190, tech: 200, days: 38, conf: "84%", st: "crit", hist: [152, 154, 158, 163, 168, 172, 176, 181, 184], proj: [184, 190, 197, 205] },
+  // "nsxt1" (NSX T1 Gateways) não é mais mock: vem de /nsx/t1/* — ver useNsxT1().
   { id: "ipset", name: "NSX IP Set · TESP02", usage: 8106, op: 9200, tech: 9600, days: 132, conf: "91%", st: "warn", hist: [6100, 6400, 6700, 7000, 7280, 7520, 7740, 7940, 8106], proj: [8106, 8420, 8760, 9110] },
   { id: "lsp", name: "Logical Switch Ports · TESP02", usage: 20626, op: 24500, tech: 26000, days: 156, conf: "88%", st: "warn", hist: [15300, 16000, 16800, 17500, 18200, 18900, 19500, 20100, 20626], proj: [20626, 21400, 22250, 23150] },
   { id: "nat", name: "NSX NAT Rules · TESP03", usage: 17097, op: 25000, tech: 30000, days: 310, conf: "79%", st: "ok", hist: [11800, 12400, 13000, 13600, 14300, 14900, 15600, 16350, 17097], proj: [17097, 17800, 18540, 19300] },
@@ -145,7 +145,7 @@ const CAPACITY = [
   { id: "aci", name: "ACI MAC_PER_IP · TESP02", usage: 0, op: 9200, tech: 10000, days: null, conf: "—", st: "nocollect", hist: [], proj: [] },
 ];
 const LIMITS = [
-  { plat: "NSX-T", res: "Tier-1 Routers", edge: "TESP07", use: 184, op: 190, vendor: 4000, src: "premissa arquitetura" },
+  // NSX-T · Tier-1 Routers: linhas reais por site via /nsx/t1/resumo (Muralha).
   { plat: "NSX-T", res: "NAT Rules", edge: "TESP03", use: 17097, op: 25000, vendor: 30000, src: "config-max VMware" },
   { plat: "Palo Alto", res: "Sessões vsys1", edge: "TESP02", use: 690000, op: 2000000, vendor: 4000000, src: "datasheet PA-5260" },
   { plat: "Palo Alto", res: "Regras de firewall", edge: "TESP02", use: 48, op: 85, vendor: 100, src: "premissa (%)" },
@@ -302,6 +302,83 @@ async function api(path, opts = {}) {
   return res.json();
 }
 
+/* NSX T1 — OBS · nsx-collector → InfluxDB (read-model /nsx/t1/*).            */
+/* Limite operacional = 80 % do config-max do NSX (premissa MAN, editável).     */
+const NSX_T1_OP_FRAC = 0.8;
+/* Regressão linear sobre o histórico diário → projeção (CALC) em 3 passos de 30 d. */
+function projetar(hist, op) {
+  const n = hist.length;
+  if (n < 7) return { proj: hist.length ? [hist[n - 1]] : [], days: null, conf: "—" };
+  const xs = hist.map((_, i) => i), mx = (n - 1) / 2, my = hist.reduce((a, b) => a + b, 0) / n;
+  let sxy = 0, sxx = 0, sst = 0;
+  xs.forEach((x, i) => { sxy += (x - mx) * (hist[i] - my); sxx += (x - mx) ** 2; sst += (hist[i] - my) ** 2; });
+  const slope = sxx ? sxy / sxx : 0, last = hist[n - 1];
+  const r2 = sst ? Math.max(0, Math.min(1, (slope * slope * sxx) / sst)) : 0;
+  const proj = [last, ...[30, 60, 90].map((d) => Math.round(last + slope * d))];
+  const days = slope > 0 && last < op ? Math.round((op - last) / slope) : null;
+  return { proj, days, conf: `${Math.round(r2 * 100)}%` };
+}
+function useNsxT1(site) {
+  const [sites, setSites] = useState([]);
+  const [data, setData] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  React.useEffect(() => {
+    let vivo = true;
+    (async () => {
+      setBusy(true); setErr("");
+      try {
+        const resumo = await api("/nsx/t1/resumo");
+        if (!vivo) return;
+        setSites(resumo);
+        const alvo = resumo.find((r) => r.site === site) || resumo[0];
+        if (!alvo) { setData(null); setBusy(false); return; }
+        const [hist, t0, vrf] = await Promise.all([
+          api(`/nsx/t1/historico?site=${encodeURIComponent(alvo.site)}&dias=90`),
+          api(`/nsx/t1/por-t0?site=${encodeURIComponent(alvo.site)}`),
+          api(`/nsx/t1/por-vrf?site=${encodeURIComponent(alvo.site)}`),
+        ]);
+        if (!vivo) return;
+        const serie = hist.map((h) => h.total).filter((v) => v != null);
+        const tech = alvo.nsx_max || 4000, op = Math.round(tech * NSX_T1_OP_FRAC);
+        const usage = alvo.total ?? alvo.nsx_current ?? 0;
+        const { proj, days, conf } = projetar(serie, op);
+        const st = usage >= op ? "crit" : usage >= op * 0.85 ? "warn" : "ok";
+        setData({ id: "nsxt1", name: `NSX T1 Gateways · ${alvo.site}`, site: alvo.site, usage, op, tech, days, conf, st, hist: serie, proj, t0, vrf, resumo: alvo });
+      } catch (e) { if (vivo) setErr(String(e.message || e)); }
+      if (vivo) setBusy(false);
+    })();
+    return () => { vivo = false; };
+  }, [site]);
+  return { sites, data, busy, err };
+}
+/* Barras horizontais count/limit, cor por usage_pct (molde do ranking do Corvo). */
+function T1Bars({ rows, nameKey, title }) {
+  const data = rows.map((r) => ({ k: r[nameKey], n: r.t1_count, lim: r.limit, pct: r.usage_pct }));
+  const cor = (pct) => pct >= 90 ? "var(--state-crit)" : pct >= 70 ? "var(--cap-limit-op)" : "var(--petrol-500)";
+  return (
+    <Card>
+      <div style={{ display: "flex", justifyContent: "space-between" }}><Cap>{title} — {rows.length}</Cap><Chip m="OBS" s="nsx-collector → InfluxDB" /></div>
+      {!rows.length ? <div style={{ marginTop: 10, color: "var(--state-nocollect)", fontFamily: "var(--font-mono)", fontSize: 12 }}>◌ sem coleta</div> : (
+        <div style={{ height: Math.max(120, data.length * 26 + 30), marginTop: 10 }}>
+          <ResponsiveContainer>
+            <BarChart data={data} layout="vertical" margin={{ left: 4, right: 64, top: 2, bottom: 0 }}>
+              <CartesianGrid horizontal={false} stroke="var(--hairline)" />
+              <XAxis type="number" allowDecimals={false} tick={{ fontSize: 10.5, fontFamily: "var(--font-mono)" }} stroke="var(--text-faint)" />
+              <YAxis type="category" dataKey="k" width={170} tick={{ fontSize: 10.5, fontFamily: "var(--font-mono)" }} stroke="var(--text-faint)" />
+              <Tooltip cursor={{ fill: "var(--selection)" }} contentStyle={{ fontFamily: "var(--font-mono)", fontSize: 11, border: "1px solid var(--hairline)", borderRadius: 6, background: "var(--surface)", color: "var(--ink)" }} formatter={(v, _n, it) => [`${v} de ${it.payload.lim} (${it.payload.pct} %)`, "T1"]} />
+              <Bar dataKey="n" radius={[0, 3, 3, 0]}>
+                {data.map((r, i) => <Cell key={i} fill={cor(r.pct)} />)}
+                <LabelList dataKey="n" position="right" content={({ x, y, width, height, value, index }) => <text x={x + width + 4} y={y + height / 2 + 4} style={{ fontFamily: "var(--font-mono)", fontSize: 10.5, fill: "var(--ink)" }}>{value}/{data[index].lim}</text>} />
+              </Bar>
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+      )}
+    </Card>
+  );
+}
+
 /* Trajetória — sólida=observado · tracejada=projetado · âmbar=limite op.     */
 function Trajectory({ hist, proj, op, tech, h = 150 }) {
   if (!hist.length) return <div style={{ height: h, display: "grid", placeItems: "center", color: "var(--state-nocollect)", border: "1px dotted var(--state-nocollect)", borderRadius: 6, fontFamily: "var(--font-mono)", fontSize: 12 }}>◌ sem coleta</div>;
@@ -333,7 +410,7 @@ function Runway({ name, usage, op, tech, days, conf, st, sel, onClick }) {
       <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12.5, marginBottom: 5 }}>
         <span style={{ fontWeight: sel ? 600 : 400 }}>{name}</span>
         <span style={{ display: "inline-flex", gap: 10, alignItems: "baseline" }}>
-          <St st={st} label={st === "nocollect" ? "sem coleta 26 h" : st === "stale" ? "instável" : `${days} dias`} />
+          <St st={st} label={st === "nocollect" ? "sem coleta 26 h" : st === "stale" ? "instável" : days != null ? `${days} dias` : "sem tendência"} />
           {conf !== "—" && <span className="num" style={{ fontSize: 10.5, color: "var(--text-faint)" }}>{conf}</span>}
         </span>
       </div>
@@ -527,30 +604,51 @@ function Conselho({ go }) {
 
 function TresOlhos() {
   const [sel, setSel] = useState("nsxt1");
-  const r = CAPACITY.find((x) => x.id === sel);
+  const [site, setSite] = useState("");
+  const nsx = useNsxT1(site);
+  const lista = nsx.data ? [nsx.data, ...CAPACITY] : CAPACITY;
+  const r = lista.find((x) => x.id === sel) || lista[0];
+  const n = nsx.data;
+  const alerta = n && n.days != null && n.days <= 180;
   return (
     <div style={{ display: "grid", gap: 14 }}>
-      <div style={{ background: "var(--state-crit-bg)", border: "1px solid var(--state-crit)", borderRadius: "var(--radius)", padding: "11px 15px", display: "flex", alignItems: "center", gap: 13, flexWrap: "wrap" }}>
-        <span style={{ fontFamily: "var(--font-mono)", color: "var(--state-crit)", fontSize: 15 }}>▲</span>
+      <div style={{ background: alerta ? "var(--state-crit-bg)" : "var(--surface)", border: `1px solid ${alerta ? "var(--state-crit)" : "var(--hairline)"}`, borderRadius: "var(--radius)", padding: "11px 15px", display: "flex", alignItems: "center", gap: 13, flexWrap: "wrap" }}>
+        <span style={{ fontFamily: "var(--font-mono)", color: alerta ? "var(--state-crit)" : "var(--text-muted)", fontSize: 15 }}>{alerta ? "▲" : "●"}</span>
         <div style={{ flex: 1, minWidth: 200 }}>
-          <div style={{ fontSize: 13.5, fontWeight: 600 }}>NSX T1 pode atingir o limite operacional em 38 dias.</div>
-          <div style={{ fontSize: 11.5, color: "var(--text-muted)", marginTop: 2 }}>TESP07 · 184 de 190 T1 · projeção 12 m, confiança 84 %</div>
+          {nsx.err ? <div style={{ fontSize: 13.5, fontWeight: 600, color: "var(--state-crit)" }}>NSX T1: {nsx.err}</div>
+            : !n ? <div style={{ fontSize: 13.5, fontWeight: 600 }}>{nsx.busy ? "carregando capacity de T1…" : "◌ sem coleta de T1"}</div>
+            : <>
+              <div style={{ fontSize: 13.5, fontWeight: 600 }}>{n.days != null ? `NSX T1 pode atingir o limite operacional em ${n.days} dias.` : "NSX T1 sem tendência de esgotamento no horizonte projetado."}</div>
+              <div style={{ fontSize: 11.5, color: "var(--text-muted)", marginTop: 2 }}>{n.site} · {fmt(n.usage)} de {fmt(n.op)} T1 (config-max {fmt(n.tech)}) · projeção 90 d, confiança {n.conf}</div>
+            </>}
         </div>
-        <Chip m="EST" s="mock — aguardando nsx_collector" />
+        {nsx.sites.length > 1 && (
+          <select value={n ? n.site : site} onChange={(e) => setSite(e.target.value)} style={{ font: "500 12px var(--font-mono)", padding: "4px 8px", border: "1px solid var(--hairline)", borderRadius: 4, background: "var(--surface)", color: "var(--ink)" }}>
+            {nsx.sites.map((x) => <option key={x.site} value={x.site}>{x.site} · {fmt(x.total ?? 0)}</option>)}
+          </select>
+        )}
+        <Chip m="OBS" s="nsx-collector → InfluxDB" />
       </div>
-      <Card mock>
+      <Card mock={r.id !== "nsxt1"}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 8 }}>
           <span style={{ font: "600 14px var(--font-ui)", color: "var(--petrol-900)" }}>{r.name}</span>
-          {r.days && <span className="num" style={{ font: "700 14px var(--font-mono)", color: "var(--cap-limit-op)" }}>{r.days} dias · {r.conf}</span>}
+          {r.days != null && <span className="num" style={{ font: "700 14px var(--font-mono)", color: "var(--cap-limit-op)" }}>{r.days} dias · {r.conf}</span>}
         </div>
         <Trajectory hist={r.hist} proj={r.proj} op={r.op} tech={r.tech} h={170} />
+        {r.id === "nsxt1" && <div style={{ marginTop: 6, display: "flex", gap: 8, flexWrap: "wrap" }}><Chip m="OBS" s="histórico diário · nsx_t1_totals" /><Chip m="CALC" s="projeção linear 90 d" /><Chip m="MAN" s={`limite op = ${Math.round(NSX_T1_OP_FRAC * 100)} % do config-max`} /></div>}
       </Card>
-      <Card mock>
+      <Card mock={!n}>
         <Cap style={{ marginBottom: 10 }}>runways por recurso</Cap>
         <div style={{ display: "grid", gap: 4 }}>
-          {CAPACITY.map((x) => <Runway key={x.id} {...x} name={x.name} sel={sel === x.id} onClick={() => setSel(x.id)} />)}
+          {lista.map((x) => <Runway key={x.id} {...x} name={x.name} sel={sel === x.id} onClick={() => setSel(x.id)} />)}
         </div>
       </Card>
+      {n && (
+        <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) minmax(0,1fr)", gap: 14 }}>
+          <T1Bars rows={n.t0} nameKey="t0_name" title={`T1 por T0 · ${n.site}`} />
+          <T1Bars rows={n.vrf} nameKey="vrf_name" title={`T1 por VRF · ${n.site}`} />
+        </div>
+      )}
     </div>
   );
 }
@@ -631,10 +729,16 @@ function Corvo() {
 }
 
 function Muralha() {
+  const [nsx, setNsx] = useState([]);
+  const [err, setErr] = useState("");
+  React.useEffect(() => { api("/nsx/t1/resumo").then(setNsx).catch((e) => setErr(String(e.message || e))); }, []);
+  const linhasNsx = nsx.map((r) => ({ plat: "NSX-T", res: "Tier-1 Routers", edge: r.site, use: r.total ?? r.nsx_current ?? 0, op: Math.round((r.nsx_max || 4000) * NSX_T1_OP_FRAC), vendor: r.nsx_max || 4000, src: "OBS · capacity NSX · op = 80 % (premissa)" }));
+  const linhas = [...linhasNsx, ...LIMITS];
   return (
     <Card mock style={{ padding: 0, overflow: "hidden" }}>
-      <div style={{ display: "flex", justifyContent: "space-between", padding: "15px 18px 10px" }}>
-        <Cap>limites de plataforma — uso × operacional × fabricante</Cap><Chip m="EST" s="mock — aguardando coletores" />
+      <div style={{ display: "flex", justifyContent: "space-between", padding: "15px 18px 10px", gap: 8, flexWrap: "wrap" }}>
+        <Cap>limites de plataforma — uso × operacional × fabricante</Cap>
+        <span style={{ display: "inline-flex", gap: 6 }}><Chip m="OBS" s={err ? `NSX T1 indisponível: ${err}` : `NSX T1 · ${nsx.length} sites`} /><Chip m="EST" s="demais — mock" /></span>
       </div>
       <div className="tscroll">
       <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5 }}>
@@ -643,7 +747,7 @@ function Muralha() {
             <th key={i} style={{ textAlign: i >= 3 && i <= 6 ? "right" : "left", padding: "7px 14px", font: "600 10px var(--font-ui)", letterSpacing: ".14em", textTransform: "uppercase", color: "var(--text-muted)", whiteSpace: "nowrap" }}>{h}</th>
           ))}
         </tr></thead>
-        <tbody>{LIMITS.map((l, i) => {
+        <tbody>{linhas.map((l, i) => {
           const slack = Math.round(100 * (1 - l.use / l.op));
           const st = slack < 10 ? "crit" : slack < 35 ? "warn" : "ok";
           return (
