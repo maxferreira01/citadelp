@@ -818,19 +818,27 @@ const LS_PROJ = "citadel_proj_t1";
 const addMes = (ym, k) => { const [y, m] = ym.split("-").map(Number); const d = new Date(Date.UTC(y, m - 1 + k, 1)); return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`; };
 const fmtYM = (ym) => { const [y, m] = ym.split("-"); return `${["jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez"][+m - 1]}/${y.slice(2)}`; };
 function projetarBruno(p, atual, inicioYM) {
-  const linhas = []; let acc = atual, cap = p.limite, site = EDGE_PRODUTIVO, esgotouEm = null;
+  // séries por site: o edge produtivo congela quando o novo site entra; o novo nasce em 0
+  const series = [{ nome: EDGE_PRODUTIVO, acc: atual, cap: p.limite, ativo: true, pontos: [] }];
+  const linhas = []; let esgotouEm = null;
   for (let k = 1; k <= p.meses; k++) {
     const ym = addMes(inicioYM, k);
     const cresc = ym <= p.fase1Ate ? p.fase1 + p.mi : p.fase2;
     const eventos = [];
-    if (p.novoSite.nome && ym === p.novoSite.mes) { acc = 0; cap = p.novoSite.capacity; site = p.novoSite.nome; eventos.push(`${p.novoSite.nome} entra com ${fmt(p.novoSite.capacity)}`); }
-    p.extras.filter((e) => e.mes === ym).forEach((e) => { cap += +e.t1; eventos.push(`+${e.t1} ${e.desc}`); });
-    acc += cresc;
-    const restante = cap - acc;
+    if (p.novoSite.nome && ym === p.novoSite.mes) {
+      series.forEach((sr) => { sr.ativo = false; });
+      series.push({ nome: p.novoSite.nome, acc: 0, cap: p.novoSite.capacity, ativo: true, pontos: [] });
+      eventos.push(`${p.novoSite.nome} entra com ${fmt(p.novoSite.capacity)} — ${EDGE_PRODUTIVO} congela`);
+    }
+    const ativo = series[series.length - 1];
+    p.extras.filter((e) => e.mes === ym).forEach((e) => { ativo.cap += +e.t1; eventos.push(`+${e.t1} ${e.desc}`); });
+    ativo.acc += cresc;
+    series.forEach((sr) => { while (sr.pontos.length < k - 1) sr.pontos.push({ ym: null, acc: null, cap: null }); sr.pontos.push({ ym, acc: sr.acc, cap: sr.cap }); });
+    const restante = ativo.cap - ativo.acc;
     if (restante < 0 && !esgotouEm) esgotouEm = ym;
-    linhas.push({ ym, site, cresc, acc, cap, restante, eventos });
+    linhas.push({ ym, site: ativo.nome, cresc, acc: ativo.acc, cap: ativo.cap, restante, eventos, total: series.reduce((t, sr) => t + sr.acc, 0) });
   }
-  return { linhas, esgotouEm };
+  return { linhas, esgotouEm, series };
 }
 
 /* Criados por mês no edge produtivo — barras de uma série, mês corrente = parcial. */
@@ -855,6 +863,48 @@ function CriadosPorMes({ linhas, fonte, media }) {
         </ResponsiveContainer>
       </div>
     </div>
+  );
+}
+
+
+/* Mapa do que está por vir: uma linha por site (o produtivo congela, o novo nasce), capacity tracejada, crosshair. */
+const SERIE_COR = ["var(--action)", "#0E4F6E", "#3C8DAA"];
+function MapaPorVir({ r, esc }) {
+  const [hi, setHi] = useState(null);
+  const ref = React.useRef(null);
+  const W = 640, h = 220, n = r.linhas.length;
+  const x = (i) => 40 + (i * (W - 56)) / Math.max(1, n - 1);
+  const y = (v) => 14 + (h - 44) * (1 - v / esc);
+  const path = (pts, key) => { let d = "", pen = false; pts.forEach((pt, i) => { if (pt[key] == null) { pen = false; return; } d += `${pen ? "L" : "M"}${x(i)},${y(pt[key])}`; pen = true; }); return d; };
+  const onMove = (e) => { const box = ref.current.getBoundingClientRect(); const px = ((e.clientX - box.left) / box.width) * W; const i = Math.round(((px - 40) / (W - 56)) * (n - 1)); setHi(Math.max(0, Math.min(n - 1, i))); };
+  const li = hi != null ? r.linhas[hi] : null;
+  return (
+    <Card>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", flexWrap: "wrap", gap: 8 }}>
+        <Cap>mapa do que está por vir — acumulado por site × capacity</Cap>
+        <span style={{ display: "inline-flex", gap: 12, fontSize: 10.5, fontFamily: "var(--font-mono)", color: "var(--text-muted)" }}>
+          {r.series.map((sr, i) => <span key={sr.nome}><i style={{ display: "inline-block", width: 14, height: 2, background: SERIE_COR[i % SERIE_COR.length], verticalAlign: 3, marginRight: 5 }} />{sr.nome}</span>)}
+          <span><i style={{ display: "inline-block", width: 14, borderTop: "2px dashed var(--cap-limit-op)", verticalAlign: 3, marginRight: 5 }} />capacity</span>
+        </span>
+      </div>
+      <svg ref={ref} viewBox={`0 0 ${W} ${h}`} onMouseMove={onMove} onMouseLeave={() => setHi(null)} style={{ width: "100%", height: "auto", display: "block", marginTop: 8, cursor: "crosshair" }} role="img" aria-label="T1 acumulados por mês, por site, contra a capacity disponível">
+        {[0, .5, 1].map((f) => <g key={f}><line x1={40} x2={W - 16} y1={y(esc * f)} y2={y(esc * f)} stroke="var(--hairline)" strokeDasharray="2 3" /><text x={36} y={y(esc * f) + 3} textAnchor="end" style={{ font: "500 9px var(--font-mono)", fill: "var(--text-faint)" }}>{fmt(Math.round(esc * f))}</text></g>)}
+        {r.linhas.map((l, i) => l.eventos.length ? <g key={"e" + i}><line x1={x(i)} x2={x(i)} y1={12} y2={h - 26} stroke="var(--state-info)" strokeDasharray="3 3" opacity=".7" /><title>{l.eventos.join(" · ")}</title></g> : null)}
+        {r.series.map((sr, i) => <g key={sr.nome}>
+          <path d={path(sr.pontos, "cap")} fill="none" stroke="var(--cap-limit-op)" strokeWidth="1.4" strokeDasharray="5 4" opacity={i === r.series.length - 1 ? 1 : .55} />
+          <path d={path(sr.pontos, "acc")} fill="none" stroke={SERIE_COR[i % SERIE_COR.length]} strokeWidth="2" />
+        </g>)}
+        {r.esgotouEm && (() => { const i = r.linhas.findIndex((l) => l.ym === r.esgotouEm); const si = r.series.findIndex((sr) => sr.nome === r.linhas[i].site); return <g><circle cx={x(i)} cy={y(r.linhas[i].acc)} r={5} fill="var(--state-crit)" stroke="var(--surface)" strokeWidth="1.5" /><text x={x(i)} y={y(r.linhas[i].acc) - 9} textAnchor="middle" style={{ font: "600 9.5px var(--font-mono)", fill: "var(--state-crit)" }}>{r.linhas[i].site} esgota {fmtYM(r.esgotouEm)}</text></g>; })()}
+        {r.linhas.map((l, i) => (i % 3 === 0 || i === n - 1) ? <text key={"t" + i} x={x(i)} y={h - 8} textAnchor="middle" style={{ font: "500 9px var(--font-mono)", fill: "var(--text-faint)" }}>{fmtYM(l.ym)}</text> : null)}
+        {hi != null && <g>
+          <line x1={x(hi)} x2={x(hi)} y1={10} y2={h - 26} stroke="var(--ink)" opacity=".5" />
+          {r.series.map((sr, i) => sr.pontos[hi].acc != null && <circle key={sr.nome} cx={x(hi)} cy={y(sr.pontos[hi].acc)} r={4} fill={SERIE_COR[i % SERIE_COR.length]} stroke="var(--surface)" strokeWidth="1.5" />)}
+        </g>}
+      </svg>
+      <div style={{ marginTop: 6, minHeight: 18, fontSize: 11, fontFamily: "var(--font-mono)", color: "var(--ink)" }}>
+        {li ? <><b>{fmtYM(li.ym)}</b>{r.series.map((sr, i) => sr.pontos[hi].acc != null && <span key={sr.nome} style={{ marginLeft: 12 }}><span style={{ color: SERIE_COR[i % SERIE_COR.length] }}>■</span> {sr.nome} {fmt(sr.pontos[hi].acc)} / {fmt(sr.pontos[hi].cap)} <span style={{ color: sr.pontos[hi].cap - sr.pontos[hi].acc < 0 ? "var(--state-crit)" : "var(--text-muted)" }}>({sr.pontos[hi].cap - sr.pontos[hi].acc >= 0 ? "+" : ""}{fmt(sr.pontos[hi].cap - sr.pontos[hi].acc)})</span></span>)}<span style={{ marginLeft: 12, color: "var(--text-muted)" }}>total {fmt(li.total)}</span>{li.eventos.length > 0 && <span style={{ marginLeft: 12, color: "var(--state-info)" }}>{li.eventos.join(" · ")}</span>}</> : <span style={{ color: "var(--text-faint)" }}>passe o mouse para ler mês a mês · parâmetros acima recalculam ao vivo</span>}
+      </div>
+    </Card>
   );
 }
 
@@ -883,9 +933,10 @@ function ProjecaoT1({ sites }) {
   const set = (k, v) => setP((o) => ({ ...o, [k]: v }));
   const setExtra = (i, k, v) => setP((o) => ({ ...o, extras: o.extras.map((e, j) => j === i ? { ...e, [k]: v } : e) }));
   const rodar = () => { const r = projetarBruno(p, atual, inicioYM); setRodou(r); try { localStorage.setItem(LS_PROJ, JSON.stringify(p)); } catch { /* sem storage */ } };
+  React.useEffect(() => { if (rodou) setRodou(projetarBruno(p, atual, inicioYM)); }, [p, atual]); // dinâmico após a 1ª execução
   const In = ({ k, w = 70, type = "number" }) => <input type={type} value={p[k]} onChange={(e) => set(k, type === "number" ? +e.target.value : e.target.value)} style={{ width: w, font: "500 12px var(--font-mono)", padding: "3px 6px", border: "1px solid var(--hairline)", borderRadius: 4, background: "var(--surface)", color: "var(--ink)" }} />;
   const r = rodou;
-  const esc = r ? Math.max(...r.linhas.map((l) => Math.max(l.acc, l.cap))) * 1.05 : 1;
+  const esc = r ? Math.max(...r.series.flatMap((sr) => sr.pontos.flatMap((pt) => [pt.acc || 0, pt.cap || 0]))) * 1.05 : 1;
   return (
     <div style={{ display: "grid", gap: 14 }}>
       <Card>
@@ -944,29 +995,13 @@ function ProjecaoT1({ sites }) {
             {r.esgotouEm ? <><b>Capacity do {r.linhas.find((l) => l.ym === r.esgotouEm)?.site} esgota em {fmtYM(r.esgotouEm)}</b> com as premissas atuais.</> : <><b>Não esgota</b> no horizonte de {p.meses} meses.</>}
             {" "}<span style={{ color: "var(--text-muted)" }}>Última linha: {fmt(r.linhas[r.linhas.length - 1].acc)} T1 em {r.linhas[r.linhas.length - 1].site}, restante {fmt(r.linhas[r.linhas.length - 1].restante)}.</span>
           </div>
-          <Card>
-            <Cap>mapa do que está por vir — acumulado × capacity</Cap>
-            <svg viewBox="0 0 640 200" style={{ width: "100%", height: "auto", display: "block", marginTop: 8 }} role="img" aria-label="T1 acumulados por mês contra a capacity disponível">
-              {(() => { const W = 640, h = 200, n = r.linhas.length; const x = (i) => 40 + (i * (W - 56)) / Math.max(1, n - 1); const y = (v) => 14 + (h - 44) * (1 - v / esc);
-                const pathAcc = r.linhas.map((l, i) => `${i ? "L" : "M"}${x(i)},${y(l.acc)}`).join(" ");
-                const pathCap = r.linhas.map((l, i) => `${i ? "L" : "M"}${x(i)},${y(l.cap)}`).join(" ");
-                return <>
-                  {[0, .5, 1].map((f) => <g key={f}><line x1={40} x2={W - 16} y1={y(esc * f)} y2={y(esc * f)} stroke="var(--hairline)" strokeDasharray="2 3" /><text x={36} y={y(esc * f) + 3} textAnchor="end" style={{ font: "500 9px var(--font-mono)", fill: "var(--text-faint)" }}>{fmt(Math.round(esc * f))}</text></g>)}
-                  <path d={pathCap} fill="none" stroke="var(--cap-limit-op)" strokeWidth="1.6" strokeDasharray="5 4" />
-                  <path d={pathAcc} fill="none" stroke="var(--action)" strokeWidth="2" />
-                  {r.linhas.map((l, i) => l.eventos.length ? <g key={i}><line x1={x(i)} x2={x(i)} y1={12} y2={h - 26} stroke="var(--state-info)" strokeDasharray="3 3" /><title>{l.eventos.join(" · ")}</title></g> : null)}
-                  {r.esgotouEm && (() => { const i = r.linhas.findIndex((l) => l.ym === r.esgotouEm); return <g><circle cx={x(i)} cy={y(r.linhas[i].acc)} r={5} fill="var(--state-crit)" stroke="var(--surface)" strokeWidth="1.5" /><text x={x(i)} y={y(r.linhas[i].acc) - 9} textAnchor="middle" style={{ font: "600 9.5px var(--font-mono)", fill: "var(--state-crit)" }}>esgota {fmtYM(r.esgotouEm)}</text></g>; })()}
-                  {r.linhas.map((l, i) => (i % 3 === 0 || i === n - 1) ? <text key={i} x={x(i)} y={h - 8} textAnchor="middle" style={{ font: "500 9px var(--font-mono)", fill: "var(--text-faint)" }}>{fmtYM(l.ym)}</text> : null)}
-                </>; })()}
-            </svg>
-            <div style={{ marginTop: 6, display: "flex", gap: 14, fontSize: 10.5, fontFamily: "var(--font-mono)", color: "var(--text-muted)" }}><span style={{ color: "var(--action)" }}>— acumulado (projetado)</span><span style={{ color: "var(--cap-limit-op)" }}>‒ ‒ capacity</span><span style={{ color: "var(--state-info)" }}>┆ edge extra / novo site</span></div>
-          </Card>
+          <MapaPorVir r={r} esc={esc} />
           <Card style={{ padding: 0, overflow: "hidden" }}>
             <div style={{ padding: "15px 18px 10px" }}><Cap>mês a mês (mesmas linhas da planilha: acumulado · MoM · capacity normal · evento)</Cap></div>
             <div className="tscroll">
               <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5 }}>
                 <thead><tr style={{ borderTop: "1px solid var(--hairline)", borderBottom: "1px solid var(--hairline-strong)" }}>
-                  {["mês", "site", "cresc. MoM", "acumulado", "capacity", "restante", "evento"].map((h, i) => <th key={h} style={{ textAlign: i >= 2 && i <= 5 ? "right" : "left", padding: "7px 14px", font: "600 10px var(--font-ui)", letterSpacing: ".14em", textTransform: "uppercase", color: "var(--text-muted)", whiteSpace: "nowrap" }}>{h}</th>)}
+                  {["mês", "site ativo", "cresc. MoM", "acumulado", "capacity", "restante", "total parque", "evento"].map((h, i) => <th key={h} style={{ textAlign: i >= 2 && i <= 6 ? "right" : "left", padding: "7px 14px", font: "600 10px var(--font-ui)", letterSpacing: ".14em", textTransform: "uppercase", color: "var(--text-muted)", whiteSpace: "nowrap" }}>{h}</th>)}
                 </tr></thead>
                 <tbody>{r.linhas.map((l) => { const st = l.restante < 0 ? "crit" : l.restante < l.cap * 0.15 ? "warn" : "ok"; return (
                   <tr key={l.ym} style={{ borderBottom: "1px solid var(--hairline)", background: l.eventos.length ? "var(--surface-sunken)" : "transparent" }}>
@@ -976,6 +1011,7 @@ function ProjecaoT1({ sites }) {
                     <td className="num" style={{ padding: "6px 14px", textAlign: "right" }}>{fmt(l.acc)}</td>
                     <td className="num" style={{ padding: "6px 14px", textAlign: "right", color: "var(--cap-limit-op)" }}>{fmt(l.cap)}</td>
                     <td className="num" style={{ padding: "6px 14px", textAlign: "right" }}><St st={st} label={fmt(l.restante)} /></td>
+                    <td className="num" style={{ padding: "6px 14px", textAlign: "right", color: "var(--text-muted)" }}>{fmt(l.total)}</td>
                     <td style={{ padding: "6px 14px", fontSize: 11.5, color: "var(--text-muted)" }}>{l.eventos.join(" · ")}</td>
                   </tr>); })}</tbody>
               </table>
