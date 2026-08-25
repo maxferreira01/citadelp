@@ -284,7 +284,7 @@ class Consultas:
                         {
                             "edge": s_,
                             "node": t.t0_name,
-                            "limite_node": T0_T1_LIMIT,
+                            "limite_node": None,  # só na linha "(direto no T0)", para não confundir
                             "vrf": v.vrf_name,
                             "limite_vrf": v.limit or VRF_T1_LIMIT,
                             "dia": dia,

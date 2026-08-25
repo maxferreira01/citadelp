@@ -799,7 +799,7 @@ function TabelaT1({ site }) {
         </table>
       </div>
       {rows && rows.length === 0 && <div style={{ padding: 18, color: "var(--text-muted)" }}>sem linhas</div>}
-      <div style={{ padding: "10px 18px 14px", fontSize: 11, color: "var(--text-muted)", fontFamily: "var(--font-mono)" }}>Node = T0 (par de edges, 600) · linha sombreada = T1 pendurados direto no T0 (limite 200, como uma VRF) · Dia/Mes/Ano = data do último ponto do collector</div>
+      <div style={{ padding: "10px 18px 14px", fontSize: 11, color: "var(--text-muted)", fontFamily: "var(--font-mono)" }}>Node = T0 (par de edges; Limite-node 600 aparece só na linha sombreada) · linha sombreada = T1 pendurados direto no T0 (limite 200, como uma VRF) · Dia/Mes/Ano = data do último ponto do collector</div>
     </Card>
   );
 }
