@@ -1,0 +1,23 @@
+# Corvo · Datadog — bot Slack (Socket Mode), sempre ligado.
+# Instalado por deploy/systemd/install.sh; caminhos são substituídos (__REPO__).
+[Unit]
+Description=CITADEL Corvo - bot Slack do #datadog-redes (Socket Mode)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=__USER__
+Group=__USER__
+WorkingDirectory=__REPO__
+EnvironmentFile=__REPO__/.env
+ExecStart=__REPO__/.venv/bin/python __REPO__/collectors/corvo_datadog_bot.py
+Restart=always
+RestartSec=10
+# venv + dados ficam dentro do repo; nada mais é gravado
+ProtectSystem=full
+PrivateTmp=true
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

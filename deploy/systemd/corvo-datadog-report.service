@@ -1,0 +1,18 @@
+# Corvo · Datadog — job do relatório diário (disparado pelo .timer; rode à mão com
+# `systemctl start corvo-datadog-report.service`).
+[Unit]
+Description=CITADEL Corvo - relatorio diario do #datadog-redes (DM)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=__USER__
+Group=__USER__
+WorkingDirectory=__REPO__
+EnvironmentFile=__REPO__/.env
+ExecStart=__REPO__/.venv/bin/python __REPO__/collectors/corvo_datadog_report.py --send
+TimeoutStartSec=15min
+ProtectSystem=full
+PrivateTmp=true
+NoNewPrivileges=true

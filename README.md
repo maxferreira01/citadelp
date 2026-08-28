@@ -11,8 +11,9 @@ Módulos: **Conselho** (visão executiva) · **Três Olhos** (capacidade e previ
 |---|---|---|
 | `frontend/` | SPA completa (login 4b → shell 5a → módulos) | Corvo com dados **OBS** reais da varredura do Slack; demais módulos **EST · mock sinalizado** |
 | `backend/` | FastAPI: parser do Corvo + **gateway federado do Checkmk** (hosts, discovery, activate, downtimes, downtime em lote por RDM) | código de produção, testado |
-| `collectors/` | Scanner do canal `#alert-float-ip` (Slack API → JSON) | produção |
+| `collectors/` | Scanner do canal `#alert-float-ip` (Slack API → JSON) · **Corvo · Datadog**: relatório diário do `#datadog-redes` (DM + PDF) e bot de consulta em Socket Mode ([runbook](docs/runbook-corvo-datadog.md)) | produção · novo (ago/2026) |
 | `deploy/k8s/` | Deployment/Service da API + CronJob do scanner | base |
+| `deploy/systemd/` | Units + install.sh do Corvo · Datadog para a dev-redes | novo |
 
 ## Desenvolvimento
 

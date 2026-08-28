@@ -1,0 +1,192 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<title>Corvo · Datadog On-Call — {{ sm.window.label }}</title>
+<style>{{ css | safe }}</style>
+</head>
+<body>
+<h1>Corvo · Datadog On-Call — relatório do plantão</h1>
+<div class="sub">Janela <strong>{{ sm.window.label }}</strong> · canal #datadog-redes · gerado em {{ generated_at }} (BRT)</div>
+{% for n in notes %}<div class="note">{{ n }}</div>{% endfor %}
+
+{# 1 · KPIs #}
+<div class="tiles">
+  <div class="tile"><div class="label">Pages na janela</div><div class="value">{{ sm.total }}</div>
+    <div class="delta">{{ sm.by_kind.get('auto', 0) }} auto · {{ sm.by_kind.get('manual', 0) }} acionamentos</div></div>
+  <div class="tile"><div class="label">Resposta humana (mediana)</div><div class="value">{{ sm.response.median | dur }}</div>
+    <div class="delta">p90 {{ sm.response.p90 | dur }} · máx {{ sm.response.max | dur }} · n={{ sm.response.n }}</div></div>
+  <div class="tile {% if sm.unanswered %}bad{% endif %}"><div class="label">Sem resposta</div><div class="value">{{ sm.unanswered | length }}</div>
+    <div class="delta">{{ sm.unanswered_pct }}% das pages</div></div>
+  <div class="tile"><div class="label">Ack no Datadog (exato, mediana)</div><div class="value">{{ sm.ack_exact.median | dur }}</div>
+    <div class="delta">n={{ sm.ack_exact.n }} exatos · {{ sm.ack_sources.get('proxy', 0) }} proxy · {{ sm.silent_ack | length }} ack silencioso</div></div>
+  <div class="tile"><div class="label">Resolvidas</div><div class="value">{{ sm.by_status.get('Resolved', 0) }}</div>
+    <div class="delta">{{ sm.by_status.get('Acknowledged', 0) }} ack · {{ sm.by_status.get('Triggered', 0) }} triggered · resolução mediana {{ sm.resolve.median | dur }}</div></div>
+  <div class="tile"><div class="label">Acionamentos manuais</div><div class="value">{{ sm.manual | length }}</div>
+    <div class="delta">{% if sm.oncall.Interna %}Interna: {{ sm.oncall.Interna.name or sm.oncall.Interna.user }}{% else %}Interna: —{% endif %} · {% if sm.oncall.Externa %}Externa: {{ sm.oncall.Externa.name or sm.oncall.Externa.user }}{% else %}Externa: —{% endif %}</div></div>
+</div>
+
+<div class="two">
+<div>
+{# 2 · histograma #}
+<h2>Tempo até a primeira resposta humana no Slack</h2>
+<div class="bars">
+{% for h in sm.histogram %}
+  <div class="lbl">{{ h.label }}</div>
+  <div class="track"><div class="bar" style="width: {{ (100 * h.count / max_hist) | round(1) }}%"></div></div>
+  <div class="val">{{ h.count }}</div>
+{% endfor %}
+</div>
+</div>
+<div>
+{# 4 · top DCs #}
+<h2>Datacenters</h2>
+{% if sm.by_dc %}
+<div class="bars">
+{% for dc, n in sm.by_dc.items() %}
+  <div class="lbl">{{ dc }}</div>
+  <div class="track"><div class="bar" style="width: {{ (100 * n / max_dc) | round(1) }}%"></div></div>
+  <div class="val">{{ n }} <span class="muted">({{ n | pct(sm.total) }})</span></div>
+{% endfor %}
+</div>
+{% else %}<div class="empty">sem pages na janela</div>{% endif %}
+{% if sm.unknown_dc %}<div class="muted" style="margin-top:4px">Sem DC reconhecido: {{ sm.unknown_dc | join(', ') }}</div>{% endif %}
+</div>
+</div>
+
+{# 3 · tabela das pages #}
+<h2>Pages da janela ({{ sm.total }})</h2>
+{% if sm.pages %}
+<table>
+<thead><tr>
+  <th>Hora</th><th>#</th><th>Tipo</th><th>Servidor</th><th>Evento</th><th>DC</th><th>Time</th><th>Urg.</th>
+  <th>Status</th><th>Responder</th><th class="num">Resposta</th><th class="num">Ack</th><th class="num">Resolução</th><th class="num">7d/30d</th>
+</tr></thead>
+<tbody>
+{% for p in table_pages %}
+<tr>
+  <td>{{ p.hora }}</td>
+  <td><a href="{{ p.page_url }}">{{ p.page_id }}</a></td>
+  <td>{% if p.kind == 'manual' %}<span class="tag">manual</span>{% else %}auto{% endif %}</td>
+  <td class="wrap">{{ p.servidor or (p.requested_by and ('por ' ~ p.requested_by)) or '—' }}</td>
+  <td class="wrap">{{ (p.evento or p.title or '')[:70] }}</td>
+  <td>{{ p.dc or '?' }}</td>
+  <td>{{ p.team or '?' }}</td>
+  <td>{{ p.urgency or '?' }}</td>
+  <td><span class="status {{ p.status or 'none' }}">{{ p.status or '?' }}</span></td>
+  <td>{{ p.responder_name or '—' }}{% if p.silent_ack %} <span class="src">silencioso</span>{% endif %}</td>
+  <td class="num">{% if p.response_s is not none %}{{ p.response_s | dur }} <span class="src">{{ p.response_user_name }}</span>{% elif p.unanswered %}<span class="status Triggered">sem</span>{% else %}—{% endif %}</td>
+  <td class="num">{{ p.ack_s | dur }}{% if p.ack_source %} <span class="src">{{ p.ack_source }}</span>{% endif %}</td>
+  <td class="num">{{ p.resolve_s | dur }}</td>
+  <td class="num">{{ p.d7 }}/{{ p.d30 }}</td>
+</tr>
+{% endfor %}
+</tbody>
+</table>
+{% if table_truncated %}<div class="muted" style="margin-top:4px">… mais {{ table_truncated }} pages não listadas (período longo) — a lista completa está no JSON do relatório.</div>{% endif %}
+{% else %}<div class="empty">nenhuma page na janela</div>{% endif %}
+
+<div class="two">
+<div>
+{# 5 · recorrência #}
+<h2>Recorrência</h2>
+<strong>Repetidos na janela</strong>
+{% if sm.recurrent_day %}
+<table><thead><tr><th>Servidor · Evento</th><th class="num">janela</th><th class="num">7d</th><th class="num">30d</th></tr></thead><tbody>
+{% for r in sm.recurrent_day %}
+<tr><td class="wrap">{{ r.key.replace('|', ' · ') }}</td><td class="num">{{ r.count }}</td><td class="num">{{ r.d7 }}</td><td class="num">{{ r.d30 }}</td></tr>
+{% endfor %}
+</tbody></table>
+{% else %}<div class="empty">nenhum alerta repetido na janela</div>{% endif %}
+{% if sm.recurrent_inc %}
+<div style="margin-top:6px"><strong>INCs com mais de uma page na janela:</strong>
+{% for r in sm.recurrent_inc %}{{ r.inc }} ×{{ r.count }}{% if not loop.last %} · {% endif %}{% endfor %}</div>
+{% endif %}
+<div style="margin-top:8px"><strong>Top 30 dias</strong></div>
+{% if sm.top_30d %}
+<div class="bars">
+{% for r in sm.top_30d %}
+  <div class="lbl wrap">{{ r.key.replace('|', ' · ')[:60] }}</div>
+  <div class="track"><div class="bar" style="width: {{ (100 * r.count / max_top30) | round(1) }}%"></div></div>
+  <div class="val">{{ r.count }}</div>
+{% endfor %}
+</div>
+{% else %}<div class="empty">sem histórico de 30 dias ainda</div>{% endif %}
+</div>
+<div>
+{# 6 · por responder #}
+<h2>Por responder (Datadog)</h2>
+{% if sm.responders %}
+<table><thead><tr><th>Responder</th><th class="num">Pages</th><th class="num">Resposta mediana</th><th class="num">Ack silencioso</th></tr></thead><tbody>
+{% for r in sm.responders %}
+<tr><td>{{ r.name }}</td><td class="num">{{ r.pages }}</td><td class="num">{{ r.response.median | dur }} <span class="src">n={{ r.response.n }}</span></td><td class="num">{{ r.silent_ack }}</td></tr>
+{% endfor %}
+</tbody></table>
+{% else %}<div class="empty">nenhuma page com Responder</div>{% endif %}
+{% if sm.slack_responders %}
+<div style="margin-top:6px"><strong>Quem falou no Slack:</strong>
+{% for r in sm.slack_responders %}{{ r.name }} ({{ r.events }}){% if not loop.last %} · {% endif %}{% endfor %}</div>
+{% endif %}
+
+{# 7 · por time / urgência #}
+<h2>Por time e urgência</h2>
+<div class="bars">
+{% for k, n in sm.by_team.items() %}
+  <div class="lbl">{{ k }}</div><div class="track"><div class="bar" style="width: {{ (100 * n / max_team) | round(1) }}%"></div></div><div class="val">{{ n }}</div>
+{% endfor %}
+</div>
+<div class="bars" style="margin-top:6px">
+{% for k, n in sm.by_urgency.items() %}
+  <div class="lbl">Urgência {{ k }}</div><div class="track"><div class="bar" style="width: {{ (100 * n / max_urg) | round(1) }}%"></div></div><div class="val">{{ n }}</div>
+{% endfor %}
+</div>
+{% if sm.by_origem %}<div class="muted" style="margin-top:4px">Origem: {% for k, n in sm.by_origem.items() %}{{ k }} {{ n }}{% if not loop.last %} · {% endif %}{% endfor %}</div>{% endif %}
+</div>
+</div>
+
+{# 8 · acionamentos manuais #}
+<h2>Acionamentos manuais ({{ sm.manual | length }})</h2>
+{% if sm.manual %}
+<table><thead><tr><th>Hora</th><th>#</th><th>INC</th><th>Solicitante</th><th>Justificativa</th><th>Responder</th><th class="num">Resposta</th><th>Status</th></tr></thead><tbody>
+{% for p in sm.manual %}
+<tr><td>{{ p.hora }}</td><td><a href="{{ p.page_url }}">{{ p.page_id }}</a></td><td>{{ p.inc or '—' }}</td><td>{{ p.requested_by or '—' }}</td>
+<td class="wrap">{{ (p.justificativa or '')[:220] }}</td><td>{{ p.responder_name or '—' }}</td><td class="num">{{ p.response_s | dur }}</td>
+<td><span class="status {{ p.status or 'none' }}">{{ p.status or '?' }}</span></td></tr>
+{% endfor %}
+</tbody></table>
+{% else %}<div class="empty">nenhum acionamento manual na janela</div>{% endif %}
+
+<div class="two">
+<div>
+{# 9 · plantão #}
+<h2>Plantão (último Handover Summary até o fim da janela)</h2>
+<table><tbody>
+{% for k in ['Interna', 'Externa'] %}
+<tr><td>Plantão Redes {{ k }}</td><td>{% if sm.oncall[k] and sm.oncall[k].user %}{{ sm.oncall[k].name or sm.oncall[k].user }} <span class="src">desde {{ sm.oncall[k].since }}</span>{% else %}<span class="empty">sem handover registrado</span>{% endif %}</td></tr>
+{% endfor %}
+</tbody></table>
+</div>
+<div>
+{# 10 · não respondidas #}
+<h2>Sem resposta ({{ sm.unanswered | length }})</h2>
+{% if sm.unanswered %}
+<table><thead><tr><th>Hora</th><th>#</th><th>Servidor / título</th><th>DC</th><th>Status</th></tr></thead><tbody>
+{% for p in sm.unanswered %}
+<tr><td>{{ p.hora }}</td><td><a href="{{ p.page_url }}">{{ p.page_id }}</a></td><td class="wrap">{{ p.servidor or p.title }}</td><td>{{ p.dc or '?' }}</td><td><span class="status {{ p.status or 'none' }}">{{ p.status or '?' }}</span></td></tr>
+{% endfor %}
+</tbody></table>
+{% else %}<div>Todas as pages tiveram resposta, reação ou ack.</div>{% endif %}
+</div>
+</div>
+
+{# 11 · método #}
+<div class="footer">
+<strong>Método.</strong> Fonte OBS: mensagens do bot Datadog no #datadog-redes (Slack Web API) + eventos ao vivo (Socket Mode).
+t0 = disparo da page no Slack. <em>Resposta</em> = 1ª mensagem humana atribuída (thread &gt; menção &gt; mais próxima em 30 min).
+<em>Ack</em> = transição para Acknowledged: <em>live</em> (evento ao vivo, exato) &gt; <em>edited_ts</em> (última edição, exato) &gt; <em>proxy</em> (1ª resposta humana; Datadog edita a mensagem in place e o histórico não guarda o ack).
+<em>Sem resposta</em> = nenhuma resposta, reação ou Responder. <em>Ack silencioso</em> = Responder no Datadog sem falar no Slack.
+Recorrência por (servidor, evento); 7d/30d contados até o fim da janela. DC extraído do hostname (TESP03 ≡ TESP3).
+{{ version }} · gerado {{ generated_at }} BRT.
+</div>
+</body>
+</html>

@@ -1,0 +1,46 @@
+/* Corvo · relatório Datadog — light only (PDF). Paleta de referência do dataviz:
+   sequencial azul, status fixos, tinta em tokens de texto. */
+@page { size: A4 landscape; margin: 14mm 12mm; }
+:root {
+  --surface: #fcfcfb; --plane: #f9f9f7; --ink: #0b0b0b; --ink-2: #52514e; --muted: #898781;
+  --grid: #e1e0d9; --axis: #c3c2b7; --border: rgba(11,11,11,0.10);
+  --seq-250: #86b6ef; --seq-450: #2a78d6; --seq-600: #184f95;
+  --good: #0ca30c; --warning: #fab219; --serious: #ec835a; --critical: #d03b3b;
+}
+* { box-sizing: border-box; }
+body { font-family: system-ui, -apple-system, "Segoe UI", "DejaVu Sans", sans-serif; color: var(--ink);
+       background: var(--surface); font-size: 10.5px; line-height: 1.35; margin: 0; }
+h1 { font-size: 20px; margin: 0 0 2px; font-weight: 600; }
+h2 { font-size: 13px; margin: 16px 0 6px; font-weight: 600; border-bottom: 1px solid var(--grid); padding-bottom: 3px; }
+.sub { color: var(--ink-2); margin-bottom: 10px; }
+.muted { color: var(--muted); }
+.ink2 { color: var(--ink-2); }
+.tiles { display: flex; gap: 8px; flex-wrap: wrap; margin: 8px 0 4px; }
+.tile { flex: 1 1 120px; border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px; background: var(--plane); min-width: 120px; }
+.tile .label { color: var(--ink-2); font-size: 9.5px; }
+.tile .value { font-size: 22px; font-weight: 600; margin: 2px 0 0; }
+.tile .delta { font-size: 9.5px; color: var(--ink-2); }
+.tile.bad .value { color: var(--critical); }
+table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; }
+th { text-align: left; color: var(--ink-2); font-weight: 600; border-bottom: 1px solid var(--axis); padding: 3px 5px; font-size: 9.5px; }
+td { padding: 3px 5px; border-bottom: 1px solid var(--grid); vertical-align: top; }
+td.num, th.num { text-align: right; }
+tr { page-break-inside: avoid; }
+.bars { display: grid; grid-template-columns: max-content 1fr max-content; gap: 3px 8px; align-items: center; max-width: 520px; }
+.bars .lbl { color: var(--ink-2); }
+.bars .track { background: transparent; height: 12px; position: relative; }
+.bars .bar { height: 12px; max-width: 100%; background: var(--seq-450); border-radius: 0 4px 4px 0; }
+.bars .val { color: var(--ink); font-variant-numeric: tabular-nums; }
+.two { display: flex; gap: 24px; }
+.two > div { flex: 1; }
+.status { display: inline-block; padding: 0 5px; border-radius: 3px; font-size: 9px; font-weight: 600; color: #fff; }
+.status.Resolved { background: var(--good); }
+.status.Acknowledged { background: var(--warning); color: var(--ink); }
+.status.Triggered { background: var(--critical); }
+.status.none { background: var(--muted); }
+.tag { display: inline-block; border: 1px solid var(--border); border-radius: 3px; padding: 0 4px; font-size: 9px; color: var(--ink-2); }
+.src { color: var(--muted); font-size: 8.5px; }
+.footer { page-break-inside: avoid; margin-top: 18px; padding-top: 6px; border-top: 1px solid var(--grid); color: var(--muted); font-size: 8.5px; }
+.empty { color: var(--muted); font-style: italic; }
+.wrap { word-break: break-word; }
+.note { background: var(--plane); border-left: 3px solid var(--warning); padding: 4px 8px; margin: 6px 0; color: var(--ink-2); }

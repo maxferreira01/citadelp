@@ -1,0 +1,48 @@
+# Manifesto do app Slack "Corvo" (api.slack.com/apps → Create New App → From a manifest).
+# Depois de criar: (1) Basic Information → App-Level Tokens → gerar token com
+# connections:write → SLACK_APP_TOKEN (xapp-…); (2) Install to Workspace →
+# Bot User OAuth Token → SLACK_BOT_TOKEN (xoxb-…); (3) /invite @Corvo no #datadog-redes.
+display_information:
+  name: Corvo
+  description: Relatório diário e consultas do plantão de redes (#datadog-redes)
+  background_color: "#1c5cab"
+  long_description: |
+    Bot do CITADEL (Corvo · sinais) que acompanha o canal #datadog-redes: registra
+    quem reconheceu e respondeu cada page do Datadog On-Call, tempo de reação,
+    datacenters e recorrência, envia um relatório diário (resumo + PDF) por DM e
+    responde comandos como "plantão", "mês", "tempo médio", "top dc", "alerta <id>".
+
+features:
+  bot_user:
+    display_name: Corvo
+    always_online: true
+  app_home:
+    messages_tab_enabled: true
+    messages_tab_read_only_enabled: false
+
+oauth_config:
+  scopes:
+    bot:
+      - chat:write
+      - files:write
+      - im:write
+      - im:history
+      - groups:history
+      - groups:read
+      - channels:history
+      - channels:read
+      - reactions:read
+      - users:read
+
+settings:
+  event_subscriptions:
+    bot_events:
+      - message.im
+      - message.groups
+      - message.channels
+      - reaction_added
+  interactivity:
+    is_enabled: true
+  org_deploy_enabled: false
+  socket_mode_enabled: true
+  token_rotation_enabled: false
