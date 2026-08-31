@@ -381,6 +381,54 @@ def listar_downtimes(
     return {"itens": itens, "erros": erros, "total": len(itens)}
 
 
+COLUNAS_SERVICO = [
+    "description",
+    "state",
+    "last_check",
+    "plugin_output",
+    "acknowledged",
+    "notifications_enabled",
+    "last_state_change",
+]
+
+
+def listar_servicos(
+    sites: dict[str, Site],
+    host_name: str,
+    site_id: str | None = None,
+    columns: list[str] | None = None,
+    transport: httpx.BaseTransport | None = None,
+) -> dict[str, Any]:
+    """Serviços monitorados de um host, em um site ou em todos, com erro isolado.
+
+    Sem ``site_id`` varre todos os sites registrados: o site ``redes`` é central
+    e cobre 4 datacenters, então nem sempre dá para deduzir onde o host está a
+    partir do nome dele. Site fora do ar vira entrada em ``erros`` — a consulta
+    não falha por causa de um site indisponível.
+
+    Um host que não existe naquele site responde 404 e entra em ``erros``, o que
+    é esperado ao varrer todos.
+    """
+    if site_id and site_id not in sites:
+        erro = {"site": site_id, "erro": "site não registrado"}
+        return {"itens": [], "erros": [erro], "total": 0}
+    alvos = {site_id: sites[site_id]} if site_id else sites
+
+    itens: list[dict] = []
+    erros: list[dict] = []
+    for sid, site in alvos.items():
+        gw = Gateway(site, transport=transport)
+        try:
+            for s in gw.list_services_monitorados(host_name, columns or COLUNAS_SERVICO):
+                itens.append({"site": sid, "host": host_name, **s})
+        except CheckmkError as exc:
+            erros.append({"site": sid, "erro": str(exc)})
+        finally:
+            gw.close()
+    itens.sort(key=lambda i: (i["site"], str(i.get("description") or "")))
+    return {"itens": itens, "erros": erros, "total": len(itens)}
+
+
 def _sobreviveu(gw: Gateway, host: str | None, downtime_id: Any) -> bool:
     """O downtime ainda está lá depois da tentativa de remoção?
 
