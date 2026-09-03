@@ -81,17 +81,12 @@ export const ACTIONS = [
   { ts: "25 mai 00:42", who: "Junovan", what: "RDM 549523: schedule de silêncio falhou; alarmes desativados manualmente." },
 ];
 
-/* TRÊS OLHOS / MURALHA / DOMÍNIOS / TESOURO / ARQUIVO — EST · mock.          */
-export const CAPACITY = [
-  { id: "nsxt1", name: "NSX T1 Gateways · TESP07", usage: 184, op: 190, tech: 200, days: 38, conf: "84%", st: "crit", hist: [152, 154, 158, 163, 168, 172, 176, 181, 184], proj: [184, 190, 197, 205] },
-  { id: "ipset", name: "NSX IP Set · TESP02", usage: 8106, op: 9200, tech: 9600, days: 132, conf: "91%", st: "warn", hist: [6100, 6400, 6700, 7000, 7280, 7520, 7740, 7940, 8106], proj: [8106, 8420, 8760, 9110] },
-  { id: "lsp", name: "Logical Switch Ports · TESP02", usage: 20626, op: 24500, tech: 26000, days: 156, conf: "88%", st: "warn", hist: [15300, 16000, 16800, 17500, 18200, 18900, 19500, 20100, 20626], proj: [20626, 21400, 22250, 23150] },
-  { id: "nat", name: "NSX NAT Rules · TESP03", usage: 17097, op: 25000, tech: 30000, days: 310, conf: "79%", st: "ok", hist: [11800, 12400, 13000, 13600, 14300, 14900, 15600, 16350, 17097], proj: [17097, 17800, 18540, 19300] },
-  { id: "fw", name: "FW físico — memória · TESP04", usage: 69.5, op: 85, tech: 100, days: null, conf: "—", st: "stale", hist: [58, 61, 66, 63, 70, 65, 72, 68, 69.5], proj: [69.5, 71, 72.5, 74] },
-  { id: "aci", name: "ACI MAC_PER_IP · TESP02", usage: 0, op: 9200, tech: 10000, days: null, conf: "—", st: "nocollect", hist: [], proj: [] },
-];
+/* MURALHA / DOMÍNIOS / TESOURO / ARQUIVO — EST · mock.
+   Três Olhos NÃO usa mais mock: lê /nsx/t1/* (OBS · nsx-collector → InfluxDB).            */
+/* Herói do login e do Conselho — EST · mock agregado (sem nome de recurso no painel público). */
+export const HERO = { days: 38, conf: "84%", usage: 184, op: 190, tech: 200, hist: [152, 154, 158, 163, 168, 172, 176, 181, 184], proj: [184, 190, 197, 205] };
 export const LIMITS = [
-  { plat: "NSX-T", res: "Tier-1 Routers", edge: "TESP07", use: 184, op: 190, vendor: 4000, src: "premissa arquitetura" },
+  // NSX-T · Tier-1 Routers: linhas reais por site via /nsx/t1/resumo (Muralha).
   { plat: "NSX-T", res: "NAT Rules", edge: "TESP03", use: 17097, op: 25000, vendor: 30000, src: "config-max VMware" },
   { plat: "Palo Alto", res: "Sessões vsys1", edge: "TESP02", use: 690000, op: 2000000, vendor: 4000000, src: "datasheet PA-5260" },
   { plat: "Palo Alto", res: "Regras de firewall", edge: "TESP02", use: 48, op: 85, vendor: 100, src: "premissa (%)" },
@@ -163,9 +158,9 @@ export const TITLES = {
 export const RAIL = {
   corvo: { prov: [["origem", "Slack C05JX7J5MMY"], ["última varredura", "27 jul 20:40"], ["método", "OBS · parser v1"], ["esperados (MAN)", "18 alertas"]], acts: ["Abrir plano p/ TESP3 C3", "Exportar raio-x (PDF)", "Agendar varredura diária"] },
   vigia: { prov: [["origem", "API Checkmk · 5 sites"], ["método", "OBS · gateway federado"], ["transporte", "REST + Livestatus query"]], acts: [] },
-  tresolhos: { prov: [["origem", "mock — brief/planilhas"], ["método", "EST · linear v1"], ["confiança", "79–91 %"]], acts: ["Abrir plano de ação", "Comparar domínios"] },
+  tresolhos: { prov: [["origem", "nsx-collector → InfluxDB"], ["método", "OBS · read-model /nsx/t1"], ["projeção", "CALC · linear 90 d"], ["limite op", "MAN · 2.000 T1/DC"]], acts: ["Abrir plano de ação", "Comparar domínios"] },
   conselho: { prov: [["capacidade", "EST · mock"], ["sinais", "OBS · Slack"], ["tesouro", "EST · mock"]], acts: ["Exportar resumo executivo"] },
-  muralha: { prov: [["limites op", "MAN · premissa auditada"], ["uso", "EST · mock"]], acts: ["Editar premissa de limite"] },
+  muralha: { prov: [["NSX T1", "OBS · /nsx/t1/resumo"], ["limites op", "MAN · premissa auditada"], ["demais", "EST · mock"]], acts: ["Editar premissa de limite"] },
   dominios: { prov: [["TESP03/06", "OBS · Corvo"], ["demais", "EST · mock"]], acts: ["Ver topologia"] },
   arquivo: { prov: [["conteúdo", "EST · mock"]], acts: ["Novo runbook"] },
   tesouro: { prov: [["valores", "EST · mock"]], acts: ["Registrar cotação"] },

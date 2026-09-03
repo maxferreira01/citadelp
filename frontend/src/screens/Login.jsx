@@ -5,7 +5,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { Button, TextField, TrajectoryChart } from "@ds";
 import { api } from "../api.js";
 import { useT, useLang, quoteOfDay } from "../i18n.jsx";
-import { CAPACITY } from "../mock.js";
+import { HERO } from "../mock.js";
 import { saturation } from "../capacity.js";
 import { Cap, Wordmark, TotvsLogo, LangToggle, ThemeToggle, Metric } from "../ui.jsx";
 
@@ -72,7 +72,7 @@ export default function Login({ onEnter, theme, setTheme }) {
   const [user, setUser] = useState("m.ferreira");
   const [pass, setPass] = useState("");
   const quote = quoteOfDay(lang);
-  const risk = CAPACITY[0]; // EST · mock — risco mais próximo (agregado no painel)
+  const risk = HERO; // EST · mock — risco mais próximo (agregado no painel)
   return (
     <div className="login">
       <div className="login-panel">

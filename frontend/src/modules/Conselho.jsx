@@ -1,11 +1,11 @@
 /* CONSELHO — visão executiva: dois números-héroi (capacidade EST, sinais OBS) + decisões. */
 import React from "react";
 import { Button, ProvenanceChip, StatusBadge } from "@ds";
-import { CAPACITY, DECISIONS } from "../mock.js";
+import { HERO, DECISIONS } from "../mock.js";
 import { Cap, Card, Metric } from "../ui.jsx";
 
 export default function Conselho({ go }) {
-  const risk = CAPACITY[0];
+  const risk = HERO;
   return (
     <div className="stack">
       <div className="cols-2">

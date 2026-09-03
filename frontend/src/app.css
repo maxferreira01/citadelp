@@ -122,3 +122,15 @@ p,h1,h2,h3{margin:0}
 .bubble.ai{align-self:flex-start;background:var(--bg-page)}
 /* toasts (overlay — única superfície com sombra) */
 .toasts{position:fixed;right:var(--space-5);bottom:var(--space-5);z-index:50;display:grid;gap:8px}
+
+/* ---- Três Olhos · capacity de T1 (mapa do site, medidor do parque, legendas) ---- */
+.track{position:relative;background:var(--surface-sunken);border-radius:var(--radius-sm)}
+.t0-card{border:var(--border-hairline);border-left:3px solid var(--t0-color,var(--hairline));border-radius:var(--radius-md);padding:10px 12px}
+.legend{display:flex;gap:14px;flex-wrap:wrap;align-items:center;font:var(--weight-regular) var(--text-caption) var(--font-mono);color:var(--text-muted)}
+.legend i{display:inline-block;width:10px;height:10px;border-radius:2px;vertical-align:-1px;margin-right:5px}
+.linkbtn{background:none;border:0;padding:0;cursor:pointer;font:var(--weight-medium) 12px var(--font-mono);color:var(--ink);text-align:left}
+.linkbtn:hover,.linkbtn[aria-pressed="true"]{color:var(--action)}
+.linkbtn[aria-pressed="true"]{font-weight:var(--weight-bold)}
+summary.cap{cursor:pointer;list-style:none}
+summary.cap::before{content:"▸ "}
+details[open]>summary.cap::before{content:"▾ "}
