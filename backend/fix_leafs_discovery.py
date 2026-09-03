@@ -3,6 +3,7 @@
 Uso (na dev-redes, com CITADEL_CHECKMK_SITES no ambiente):
     ../.venv/bin/python fix_leafs_discovery.py
 """
+
 import os
 import sys
 import time
@@ -28,14 +29,22 @@ if "CITADEL_CHECKMK_SITES" not in os.environ:
 from app.checkmk.gateway import CheckmkError, Gateway, load_sites  # noqa: E402
 
 PLAN = {
-    "tesp4": ["LEAF1003TESP04", "LEAF1007TESP04", "LEAF1008TESP04", "LEAF1009TESP04", "LEAF1010TESP04", "SPINE102TESP04"],
+    "tesp4": [
+        "LEAF1003TESP04",
+        "LEAF1007TESP04",
+        "LEAF1008TESP04",
+        "LEAF1009TESP04",
+        "LEAF1010TESP04",
+        "SPINE102TESP04",
+    ],
     "tesp5": [f"LEAF{n}TESP05" for n in range(1026, 1038)],
     "tece1": ["LEAF1022TECE01", "LEAF1023TECE01", "LEAF1024TECE01", "LEAF1025TECE01"],
 }
 
 
 def wait_job(gw: Gateway, host: str, tmo: int = 300) -> str:
-    """Termina quando o job reporta finished OU quando a check_table fica estável (CMK 2.1 nem sempre atualiza o job)."""
+    """Termina quando o job reporta finished OU quando a check_table fica estável
+    (CMK 2.1 nem sempre atualiza o job)."""
     t0 = time.time()
     last = None
     stable = 0
