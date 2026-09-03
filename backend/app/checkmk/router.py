@@ -1,13 +1,17 @@
 """Endpoints REST do gateway Checkmk (consumidos pelo painel CORVO)."""
 
+from typing import Annotated
+
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from app.checkmk.gateway import (
+    COLUNAS_SERVICO,
     CheckmkError,
     Gateway,
     agendar_downtime,
     listar_downtimes,
+    listar_servicos,
     load_sites,
     rdm_downtime,
     remover_downtimes,
@@ -99,6 +103,25 @@ def downtimes_federados(
     return listar_downtimes(load_sites(), site_id=site, host_name=host, tipo=tipo, servico=servico)
 
 
+@router.get("/services")
+def servicos_federados(
+    host: str,
+    site: str | None = None,
+    columns: Annotated[list[str] | None, Query()] = None,
+) -> dict:
+    """Serviços monitorados de um host, em um site ou em todos.
+
+    É a leitura que fecha o ciclo do p3kill: *o INC foi corrigido ou não?* —
+    estado do serviço antes e depois da correção, sem tocar em nada.
+
+    Sem ``site`` varre todos os registrados. O site ``redes`` é central e cobre
+    tesp2, tesp03, tece01 e tbsp02, então o site do host nem sempre se deduz do
+    nome dele; nessa varredura, host inexistente num site vira entrada em
+    ``erros``, o que é esperado.
+    """
+    return listar_servicos(load_sites(), host_name=host, site_id=site, columns=columns)
+
+
 @router.post("/downtimes", status_code=201)
 def criar_downtime(body: DowntimeNovo) -> dict:
     """Silencia um host inteiro ou serviços específicos dele."""
@@ -166,6 +189,26 @@ def list_downtimes(site_id: str, host_name: str | None = None) -> list[dict]:
     gw = _gw(site_id)
     try:
         return gw.list_downtimes(host_name)
+    except CheckmkError as exc:
+        raise HTTPException(exc.status or 502, str(exc)) from exc
+    finally:
+        gw.close()
+
+
+@router.get("/{site_id}/services")
+def list_services(
+    site_id: str,
+    host: str,
+    columns: Annotated[list[str] | None, Query()] = None,
+) -> list[dict]:
+    """Serviços monitorados de um host num site — leitura do core, nunca escrita.
+
+    Achatado como o gateway devolve (só ``extensions``), para o consumidor não
+    precisar conhecer o envelope da REST do Checkmk.
+    """
+    gw = _gw(site_id)
+    try:
+        return gw.list_services_monitorados(host, columns or COLUNAS_SERVICO)
     except CheckmkError as exc:
         raise HTTPException(exc.status or 502, str(exc)) from exc
     finally:

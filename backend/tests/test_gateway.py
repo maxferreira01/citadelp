@@ -3,9 +3,11 @@ import json
 import httpx
 
 from app.checkmk.gateway import (
+    COLUNAS_SERVICO,
     Gateway,
     Site,
     listar_downtimes,
+    listar_servicos,
     load_sites,
     normalizar_downtime,
     rdm_downtime,
@@ -216,3 +218,76 @@ def test_remover_reporta_falha_quando_downtime_sobrevive():
 def test_remover_site_desconhecido():
     recibos = remover_downtimes({}, [{"site": "x", "id": "1"}])
     assert recibos[0]["ok"] is False and "não registrado" in recibos[0]["erro"]
+
+
+# --------------------------------------------------------------- serviços (p3kill)
+
+
+def _servico(desc, state, saida="tudo certo"):
+    """Envelope da REST do Checkmk: o dado útil mora em ``extensions``."""
+    return {
+        "id": desc,
+        "title": desc,
+        "extensions": {"description": desc, "state": state, "plugin_output": saida},
+    }
+
+
+def test_list_services_monitorados_achata_extensions_e_manda_colunas():
+    reqs = []
+
+    def handler(req):
+        reqs.append(req)
+        return httpx.Response(200, json={"value": [_servico("CHECK STATE FW03TESP05", 2)]})
+
+    gw = Gateway(SITE, transport=httpx.MockTransport(handler))
+    out = gw.list_services_monitorados("monitoring-redes-1-tesp05", ["description", "state"])
+
+    assert reqs[0].url.path.endswith("/objects/host/monitoring-redes-1-tesp05/collections/services")
+    # columns vai repetido, uma vez por coluna — é o formato que a REST espera.
+    assert reqs[0].url.params.get_list("columns") == ["description", "state"]
+    assert out == [
+        {"description": "CHECK STATE FW03TESP05", "state": 2, "plugin_output": "tudo certo"}
+    ]
+
+
+def test_listar_servicos_usa_colunas_padrao_e_marca_o_site():
+    reqs = []
+
+    def handler(req):
+        reqs.append(req)
+        return httpx.Response(200, json={"value": [_servico("CHECK CORES SYSTEM", 1)]})
+
+    r = listar_servicos({"tesp05": SITE}, host_name="mon-1", transport=httpx.MockTransport(handler))
+
+    assert reqs[0].url.params.get_list("columns") == COLUNAS_SERVICO
+    assert r["total"] == 1
+    assert r["itens"][0]["site"] == "tesp05"
+    assert r["itens"][0]["host"] == "mon-1"
+    assert r["itens"][0]["description"] == "CHECK CORES SYSTEM"
+
+
+def test_listar_servicos_isola_site_fora_do_ar():
+    """Varrer todos os sites é o caso normal: `redes` é central e cobre 4 DCs.
+
+    Host que não existe num site responde 404 e vira erro — sem derrubar o resto.
+    """
+
+    def handler(req):
+        if "quebrado" in str(req.url):
+            return httpx.Response(404, text="host não existe aqui")
+        return httpx.Response(200, json={"value": [_servico("CHECK STATE FW03TESP05", 2)]})
+
+    sites = {
+        "tesp05": SITE,
+        "quebrado": Site(id="quebrado", url="https://quebrado/x", user="u", secret="s"),
+    }
+    r = listar_servicos(sites, host_name="mon-1", transport=httpx.MockTransport(handler))
+
+    assert r["total"] == 1 and r["itens"][0]["site"] == "tesp05"
+    assert r["erros"][0]["site"] == "quebrado"
+
+
+def test_listar_servicos_site_nao_registrado_nao_estoura():
+    r = listar_servicos({"tesp05": SITE}, host_name="mon-1", site_id="inexistente")
+    assert r["itens"] == [] and r["total"] == 0
+    assert r["erros"] == [{"site": "inexistente", "erro": "site não registrado"}]

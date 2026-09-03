@@ -35,6 +35,11 @@ user com **role mínima** por site. Operações expostas em `/checkmk/*`:
 - `POST /checkmk/downtimes/rdm` — **downtime em lote vinculado à RDM**, cruzando
   sites — resposta direta ao storm de 24–25 mai (schedule de silêncio falhou)
 - `GET/DELETE /checkmk/{site}/downtimes[...]` — listar/remover
+- `GET /checkmk/{site}/services?host=` — **estado dos serviços monitorados** de
+  um host (leitura do core). `GET /checkmk/services?host=` faz o mesmo federado,
+  sem precisar saber o site — útil porque o site `redes` é central e cobre 4
+  datacenters. É a verificação que o [p3kill](../p3kill/) usa para responder
+  *o INC foi corrigido ou não?*
 
 ## CI/CD
 
