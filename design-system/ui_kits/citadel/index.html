@@ -1,0 +1,43 @@
+<!-- @dsCard group="CITADEL" viewport="1440x920" name="UI Kit — Login → Três Olhos" subtitle="Documento de impressão: Login (pág. 1) e Três Olhos (pág. 2), PT/EN conforme preferência salva" -->
+<!DOCTYPE html>
+<html lang="pt-BR"><head><meta charset="utf-8"><title>CITADEL — UI Kit</title>
+<link rel="stylesheet" href="../../styles.css">
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+<script src="../../_ds_bundle.js"></script>
+<style>
+doc-page:not(:defined){visibility:hidden}
+a{color:var(--link);text-decoration:none}a:hover{color:var(--link-hover);text-decoration:underline}
+::selection{background:var(--selection)}
+*{-webkit-print-color-adjust:exact;print-color-adjust:exact}
+*{animation-delay:-99s !important;animation-duration:.001s !important;animation-iteration-count:1 !important;animation-fill-mode:both !important;animation-play-state:running !important;transition-duration:0s !important}
+.pg-fill{height:100%;overflow:hidden}
+</style></head>
+<body>
+<doc-page size="letter" orientation="landscape" content-width="1440px" content-height="920px">
+<section class="page" id="pg-login"><div class="pg-fill" id="mount-login"></div></section>
+<section class="page" id="pg-tresolhos"><div class="pg-fill" id="mount-tresolhos"></div></section>
+</doc-page>
+<script src="./doc-page.js"></script>
+<script type="text/babel">
+if (!window.CIDADELADesignSystem_99bf85) {
+  document.getElementById('mount-login').innerHTML = '<div style="padding:40px;font:13px var(--font-mono);color:var(--state-crit)">▲ _ds_bundle.js não carregou ou está desatualizado — recarregue a página.</div>';
+  throw new Error('CITADEL bundle ausente');
+}
+</script>
+<script type="text/babel" src="i18n.jsx"></script>
+<script type="text/babel" src="Login.jsx"></script>
+<script type="text/babel" src="TresOlhos.jsx"></script>
+<script type="text/babel">
+const lang = localStorage.getItem('citadel-kit-lang') || 'pt';
+const theme = localStorage.getItem('citadel-kit-theme') || 'dark';
+const noop = () => {};
+ReactDOM.createRoot(document.getElementById('mount-login')).render(
+  <window.CitadelLogin lang={lang} setLang={noop} theme={theme} setTheme={noop} onEnter={noop} />
+);
+ReactDOM.createRoot(document.getElementById('mount-tresolhos')).render(
+  <window.CitadelTresOlhos lang={lang} setLang={noop} onLogout={noop} />
+);
+</script>
+</body></html>

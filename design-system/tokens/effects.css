@@ -1,0 +1,14 @@
+:root{
+/* raios */
+--radius-sm:4px;--radius-md:6px;--radius-lg:10px;--radius-pill:999px;
+/* bordas */
+--border-hairline:1px solid var(--hairline);--border-strong:1px solid var(--hairline-strong);
+/* elevação — sem sombra em conteúdo; sombra só em overlay */
+--shadow-1:0 1px 3px rgba(17,24,35,.10);--shadow-2:0 4px 16px rgba(17,24,35,.14);--shadow-overlay:0 12px 40px rgba(4,28,43,.22);
+/* foco e interação */
+--focus-outline:2px solid var(--focus-ring);--focus-offset:2px;
+--opacity-disabled:.45; /* @kind other */
+/* movimento — mínimo e funcional */
+--motion-fast:120ms; /* @kind other */ --motion-base:200ms; /* @kind other */ --ease:cubic-bezier(.2,.6,.2,1); /* @kind other */
+}
+@media (prefers-reduced-motion:reduce){:root{--motion-fast:0ms; /* @kind other */ --motion-base:0ms; /* @kind other */}}
