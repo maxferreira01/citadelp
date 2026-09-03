@@ -9,7 +9,8 @@ Módulos: **Conselho** (visão executiva) · **Três Olhos** (capacidade e previ
 
 | Área | Conteúdo | Procedência |
 |---|---|---|
-| `frontend/` | SPA completa (login 4b → shell 5a → módulos) | Corvo com dados **OBS** reais da varredura do Slack; demais módulos **EST · mock sinalizado** |
+| `design-system/` | **CIDADELA Design System** — tokens (`styles.css`), 12 componentes React (`index.js`), kit Login → Três Olhos, specimens HTML, guidelines de marca/domínio, `SKILL.md` | fonte única de identidade visual (decisões de 27/07/2026); o frontend importa daqui via alias `@ds` |
+| `frontend/` | SPA completa (login 4b → shell 5a → módulos), **sobre o design system**: tokens + componentes de `@ds`, composições próprias em `src/ui.jsx`, uma pasta por tela (`screens/`) e por módulo (`modules/`) | Corvo com dados **OBS** reais da varredura do Slack; demais módulos **EST · mock sinalizado** |
 | `backend/` | FastAPI: parser do Corvo + **gateway federado do Checkmk** (hosts, discovery, activate, downtimes, downtime em lote por RDM) | código de produção, testado |
 | `collectors/` | Scanner do canal `#alert-float-ip` (Slack API → JSON) · **Corvo · Datadog**: relatório diário do `#datadog-redes` (DM + PDF) e bot de consulta em Socket Mode ([runbook](docs/runbook-corvo-datadog.md)) | produção · novo (ago/2026) |
 | `deploy/k8s/` | Deployment/Service da API + CronJob do scanner | base |
@@ -23,7 +24,14 @@ make setup                  # backend editable + pre-commit hooks
 make lint && make test      # mesmo gate do CI
 make run                    # API em http://localhost:8000/docs
 make build-front            # SPA (Vite)
+cd frontend && npm run dev  # SPA em dev (proxy /api → :5533)
 ```
+
+O `design-system/` fica **fora da raiz do Vite** de propósito (é um entregável
+próprio, com specimens e skill). O `frontend/vite.config.js` resolve `@ds` para
+ele, dedupa `react`/`react-dom` (os componentes do DS importam React de fora de
+`frontend/`) e libera `server.fs.allow`. Regras de uso em
+[`design-system/readme.md`](design-system/readme.md#uso-no-app-citadelpfrontend).
 
 ## Gateway Checkmk (sites descentralizados)
 

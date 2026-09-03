@@ -1,0 +1,22 @@
+:root{
+/* famílias */
+--font-brand:'TOTVS','Archivo',sans-serif; /* só peso 700 — marca e títulos */
+--font-ui:'Archivo',system-ui,sans-serif;
+--font-mono:'JetBrains Mono',ui-monospace,'SF Mono',monospace; /* IPs, CIDR, ASN, métricas, códigos, logs */
+/* escala (papéis) */
+--text-display:40px;--text-display-lh:1.05;
+--text-h1:24px;--text-h1-lh:1.15;
+--text-h2:20px;--text-h2-lh:1.2;
+--text-h3:16px;--text-h3-lh:1.3;
+--text-body:13.5px;--text-body-lh:1.55;
+--text-sm:12.5px;--text-sm-lh:1.5;
+--text-xs:11.5px;--text-xs-lh:1.4;
+--text-caption:10.5px;--text-caption-lh:1.35;
+--text-metric-hero:56px; /* números-héroi (ex.: 38 dias) */
+--text-metric-lg:28px;--text-metric:19px;--text-mono:13px;--text-mono-sm:11.5px;
+/* pesos e tracking */
+--weight-regular:400;--weight-medium:500;--weight-semibold:600;--weight-bold:700;
+--tracking-caps:.14em;--tracking-brand:.02em;--brand-stretch:124%;
+/* regra: todo número comparável usa font-feature 'tnum' + --font-mono */
+--tnum:'tnum'; /* @kind other */
+}

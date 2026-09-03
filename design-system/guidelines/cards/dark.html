@@ -1,0 +1,20 @@
+<!-- @dsCard group="Colors" viewport="700x210" name="Dark mode (NOC)" subtitle="Recalibrado para plantão — não é inversão automática" -->
+<!DOCTYPE html><html><head><meta charset="utf-8"><link rel="stylesheet" href="../../styles.css">
+<style>body{margin:0}
+.wrap{padding:16px;background:var(--bg-page);height:178px;box-sizing:border-box}
+.row{display:flex;gap:8px;flex-wrap:wrap}
+.chip{display:inline-flex;align-items:center;gap:7px;background:var(--surface);border:1px solid var(--hairline);border-radius:6px;padding:7px 11px;font:11.5px var(--font-mono);color:var(--ink)}
+.k{font:10px var(--font-mono);letter-spacing:.12em;text-transform:uppercase;color:var(--text-muted);margin:0 0 8px}</style></head>
+<body data-theme="dark"><div class="wrap">
+<p class="k">superfície 141C27 · página 0F141B · hairline 263344</p>
+<div class="row">
+<span class="chip"><i style="font-style:normal;color:var(--state-crit)">▲</i>crítico E76A54</span>
+<span class="chip"><i style="font-style:normal;color:var(--state-warn)">◆</i>atenção E0A34E</span>
+<span class="chip"><i style="font-style:normal;color:var(--state-ok)">●</i>saudável 8FD0A9</span>
+<span class="chip" style="border-style:dotted"><i style="font-style:normal;color:var(--state-nocollect)">◌</i>sem coleta 8FA3B5</span>
+<span class="chip"><span style="color:var(--action)">ação 5D9FC9</span></span>
+<span class="chip"><span style="color:var(--link)">link 7FC7E8</span></span>
+</div>
+<p class="k" style="margin-top:12px">runway em dark</p>
+<svg width="100%" height="18" viewBox="0 0 640 18" preserveAspectRatio="none"><rect y="4" width="640" height="10" rx="5" fill="var(--cap-available)"/><rect y="4" width="560" height="10" rx="5" fill="var(--cap-consumed)"/><line x1="600" y1="0" x2="600" y2="18" stroke="var(--cap-limit-op)" stroke-width="2.5"/><line x1="638" y1="0" x2="638" y2="18" stroke="var(--cap-limit-tech)" stroke-width="3"/></svg>
+</div></body></html>

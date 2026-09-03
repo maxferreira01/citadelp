@@ -1,0 +1,28 @@
+<?xml version="1.0"?>
+<svg id="Layer_1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" version="1.1" viewBox="0 0 1920 1080">
+  
+  <defs>
+    
+  </defs>
+  <rect class="st1" width="1920" height="540"></rect>
+  <image width="510" height="512" transform="translate(78.1 610.8) scale(.4)"></image>
+  <image width="499" height="512" transform="translate(396.4 613.5) scale(.4)"></image>
+  <image width="512" height="480" transform="translate(708.6 620.9) scale(.4)"></image>
+  <image width="495" height="512" transform="translate(1024.3 613.5) scale(.4)"></image>
+  <image width="512" height="484" transform="translate(1336.4 620.8) scale(.4)"></image>
+  <image width="503" height="512" transform="translate(1646.3 609.9) scale(.4)"></image>
+  <image width="483" height="512" transform="translate(1728.5 891.7) scale(.2)"></image>
+  <image width="503" height="512" transform="translate(1539.4 887.7) scale(.2)"></image>
+  <image width="511" height="512" transform="translate(1353.2 885.3) scale(.3)"></image>
+  <image width="503" height="512" transform="translate(1170.4 884.3) scale(.3)"></image>
+  <image width="486" height="512" transform="translate(990.6 885.3) scale(.3)"></image>
+  <image width="505" height="512" transform="translate(807.7 887.7) scale(.2)"></image>
+  <image width="512" height="472" transform="translate(621.9 890.5) scale(.2)"></image>
+  <image width="512" height="480" transform="translate(439 889.5) scale(.2)"></image>
+  <image width="495" height="512" transform="translate(259.4 886.7) scale(.2)"></image>
+  <image width="429" height="512" transform="translate(82.8 884.5) scale(.3)"></image>
+  <g>
+    <path class="st0" d="M1297.3,174.7c-1.7-6.4-5.9-12.1-11.8-16.5-30.7-23.1-67.3-40.4-107-50.6-3.8-1-7.8-1.5-11.8-1.5s-8,.5-11.8,1.5c-39.8,10.3-76.3,27.5-107,50.6-5.9,4.4-10,10.1-11.8,16.5-4.6,16.8-6.9,33.8-6.9,50.9v88.8c0,17.1,2.3,34.1,6.9,50.9,1.7,6.4,5.9,12.1,11.8,16.5,30.7,23.1,67.3,40.4,107,50.6,3.8,1,7.8,1.5,11.8,1.5s8-.5,11.8-1.5c39.8-10.3,76.3-27.5,107-50.6,5.9-4.4,10-10.1,11.8-16.5,4.6-16.8,6.9-33.8,6.9-50.9v-88.8c0-17.1-2.3-34.1-6.9-50.9ZM1293.5,275.8c-1.5,5.7-5.2,10.8-10.6,14.8-15.1,11.3-31.7,21.3-49.4,29.7-17.7,8.4-36.6,15.2-56.1,20.2-3.5.9-7,1.3-10.7,1.3s-7.2-.5-10.7-1.3c-19.5-5-38.4-11.8-56.1-20.2-17.7-8.4-34.3-18.4-49.4-29.7-5.4-4-9-9.2-10.6-14.8h0c-1-3.8-1-7.8,0-11.6h0c1.5-5.7,5.2-10.8,10.6-14.9,15.1-11.3,31.7-21.3,49.4-29.7,17.7-8.4,36.6-15.2,56.1-20.2,3.5-.9,7-1.3,10.7-1.3s7.2.5,10.7,1.3c19.5,5,38.4,11.8,56.1,20.2,17.7,8.4,34.3,18.4,49.4,29.7,5.4,4,9,9.2,10.6,14.8h0c1,3.8,1,7.8,0,11.6h0Z"></path>
+    <image width="575" height="685" transform="translate(615.4 105.6) scale(.5)"></image>
+  </g>
+</svg>

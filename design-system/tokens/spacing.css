@@ -1,0 +1,10 @@
+:root{
+/* escala base 4 */
+--space-1:4px;--space-2:8px;--space-3:12px;--space-4:16px;--space-5:20px;--space-6:24px;--space-8:32px;--space-10:40px;--space-12:48px;--space-16:64px;
+/* densidade (padrão confortável; compacta como toggle) */
+--row-comfortable:44px;--row-compact:36px;--row:var(--row-comfortable);
+--cell-pad-x:12px;--cell-pad-y-comfortable:12px;--cell-pad-y-compact:8px;
+/* layout — aprovado na tela 5a */
+--sidebar-w:228px;--rail-w:316px;--page-pad:24px;--content-max:1280px;
+--topbar-h:49px;
+}

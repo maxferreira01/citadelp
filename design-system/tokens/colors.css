@@ -1,0 +1,49 @@
+:root{
+/* primitivas — petróleo (derivado do logo TOTVS #002233) */
+--petrol-950:#001622;--petrol-900:#002233;--petrol-800:#06344C;--petrol-700:#0B4364;--petrol-600:#0D5178;--petrol-500:#0F5E8C;--petrol-400:#3D7FA6;--petrol-300:#6FA3C2;--petrol-200:#A3C4D9;--petrol-100:#D0E0EC;--petrol-50:#E6EEF4;
+/* neutros frios */
+--neutral-950:#0F141B;--neutral-900:#111823;--neutral-800:#1D2734;--neutral-700:#2E3B4C;--neutral-600:#46556A;--neutral-500:#5B6675;--neutral-400:#77828F;--neutral-300:#98A2AE;--neutral-200:#C2CAD4;--neutral-150:#D6DCE5;--neutral-100:#E4E8EF;--neutral-50:#F1F3F7;--neutral-0:#FFFFFF;
+/* âmbar — proximidade de limite */
+--amber-700:#8A5209;--amber-500:#B4690E;--amber-300:#E0A34E;--amber-100:#F6E8D3;
+/* estados semânticos (cor+glifo+texto, nunca só cor) */
+--state-info:#275FA8;--state-info-bg:#E8EFF8;
+--state-ok:#2F7D4F;--state-ok-bg:#E7F2EB;
+--state-warn:#96690A;--state-warn-bg:#F6EDD8;
+--state-crit:#B23A26;--state-crit-bg:#F8E9E6;
+--state-emergency:#7C1128;--state-emergency-bg:#F6E3E8;
+--state-unknown:#6C5A9E;--state-unknown-bg:#EEEAF6;
+--state-unavailable:#5C636B;--state-unavailable-bg:#ECEDEF;
+--state-nocollect:#7A828C;--state-nocollect-bg:#EEF0F2;
+--state-stale:#8A6D3B;--state-stale-bg:#F3EDDF;
+--state-divergent:#7B4E9E;--state-divergent-bg:#F1EAF7;
+/* capacidade */
+--cap-available:#E4E8EF;--cap-reserved:#A3C4D9;--cap-consumed:#0F5E8C;--cap-projected:rgba(15,94,140,.35);--cap-limit-op:#B4690E;--cap-limit-tech:#111823;
+/* qualidade do dado */
+--dq-observed:#0F5E8C;--dq-calculated:#2E3B4C;--dq-estimated:#96690A;--dq-manual:#6C5A9E;--dq-stale:#8A6D3B;--dq-divergent:#7B4E9E;--dq-noorigin:#5C636B;
+/* paleta institucional TOTVS (referência de marca — NÃO usar como acento de UI; decisão 27/07) */
+--totvs-azulescuro:#002233;--totvs-azul:#00dbff;--totvs-roxo:#a44dff;--totvs-verde:#00ffd4;--totvs-limao:#d9ff65;--totvs-laranja:#ff8900;--totvs-rosa:#ff009e;
+/* aliases de superfície e texto — light (padrão de análise) */
+--bg-page:#F1F3F7;--surface:#FFFFFF;--surface-sunken:#E9ECF2;--hairline:#D6DCE5;--hairline-strong:#111823;
+--ink:#111823;--text-body:#111823;--text-muted:#5B6675;--text-faint:#77828F;--text-inverse:#E7ECF3;
+--brand:#002233;--action:#0F5E8C;--action-hover:#0B4364;--action-press:#06344C;--selection:#E6EEF4;--focus-ring:#0F5E8C;
+--link:#0F5E8C;--link-hover:#0B4364;
+}
+/* dark — modo NOC/plantão: superfícies recalibradas, não inversão */
+[data-theme="dark"]{
+--bg-page:#0F141B;--surface:#141C27;--surface-sunken:#0C1219;--hairline:#263344;--hairline-strong:#E7ECF3;
+--ink:#E7ECF3;--text-body:#E7ECF3;--text-muted:#8FA0B5;--text-faint:#67788C;--text-inverse:#111823;
+--brand:#E7ECF3;--action:#5D9FC9;--action-hover:#7FC7E8;--action-press:#A9D8EE;--selection:#16304A;--focus-ring:#7FC7E8;
+--link:#7FC7E8;--link-hover:#A9D8EE;
+--state-info:#7FA8E0;--state-info-bg:#152238;
+--state-ok:#8FD0A9;--state-ok-bg:#12281B;
+--state-warn:#E0A34E;--state-warn-bg:#2E2210;
+--state-crit:#E76A54;--state-crit-bg:#331410;
+--state-emergency:#E88AA0;--state-emergency-bg:#33101B;
+--state-unknown:#C79AD4;--state-unknown-bg:#261A31;
+--state-unavailable:#9AA3AD;--state-unavailable-bg:#1C2129;
+--state-nocollect:#8FA3B5;--state-nocollect-bg:#18202A;
+--state-stale:#B9A06A;--state-stale-bg:#292112;
+--state-divergent:#C79AD4;--state-divergent-bg:#241831;
+--cap-available:#1D2734;--cap-reserved:#2C4A63;--cap-consumed:#5D9FC9;--cap-projected:rgba(127,199,232,.35);--cap-limit-op:#E0A34E;--cap-limit-tech:#E7ECF3;
+--dq-observed:#7FC7E8;--dq-calculated:#98A2AE;--dq-estimated:#E0A34E;--dq-manual:#C79AD4;--dq-stale:#B9A06A;--dq-divergent:#C79AD4;--dq-noorigin:#9AA3AD;
+}

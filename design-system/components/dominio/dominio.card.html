@@ -1,0 +1,43 @@
+<!-- @dsCard group="Components" viewport="700x540" name="Domínio" subtitle="RunwayBar, ProvenanceChip, DomainTile, TrajectoryChart — o diferencial da CITADEL" -->
+<!DOCTYPE html><html><head><meta charset="utf-8">
+<link rel="stylesheet" href="../../styles.css">
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+<script src="../../_ds_bundle.js"></script>
+<style>body{margin:0;padding:16px 18px;background:var(--bg-page);font-family:var(--font-ui)}
+.k{font:600 9.5px var(--font-mono);letter-spacing:.14em;text-transform:uppercase;color:var(--text-muted);margin:14px 0 7px}
+.k:first-child{margin-top:0}
+.sur{background:var(--surface);border:1px solid var(--hairline);border-radius:var(--radius-md);padding:12px 14px}</style></head><body>
+<div id="root"></div>
+<script type="text/babel">
+const { RunwayBar, ProvenanceChip, ProvenancePanel, DomainTile, TrajectoryChart } = window.CIDADELADesignSystem_99bf85;
+function Card() {
+  return <div>
+    <div className="k">trajectorychart — assinatura</div>
+    <div className="sur"><TrajectoryChart height={170} history={[152,155,158,163,170,175,181,184]} projection={[184,191,199,207]} opLimit={190} techLimit={200} satIndex={8.6} satLabel="28 ago · 84%" xLabels={['jan','mar','mai','jul','set','nov']} events={[{index:9.4,label:'expansão (set)'}]} ariaText="NSX T1 pode atingir 190 em 28/08 (38 dias), confiança 84%" /></div>
+    <div className="k">runwaybar</div>
+    <div className="sur" style={{display:'flex',flexDirection:'column',gap:12}}>
+      <RunwayBar label={<span><b>NSX T1</b> · Cluster_1</span>} usage={184} opLimit={190} techLimit={200} days="▲ 38 dias" confidence="84%" state="crit" caption={<React.Fragment><span>0</span><span>uso 184</span><span>op 190 · téc 200</span></React.Fragment>} />
+      <RunwayBar label="NSX IP Set" usage={8106} opLimit={9200} techLimit={9600} days="◆ 132 dias" confidence="91%" state="warn" />
+      <RunwayBar label="ACI — MAC_PER-IP" usage={0} techLimit={100} nocollect days="◌ sem coleta 26 h" state="nocollect" />
+    </div>
+    <div className="k">provenance</div>
+    <div style={{display:'flex',gap:8,flexWrap:'wrap',alignItems:'flex-start'}}>
+      <ProvenanceChip method="OBS" source="coletor NSX" age="há 7 min" confidence="84%" />
+      <ProvenanceChip method="EST" source="forecast 12 m" confidence="84%" />
+      <ProvenanceChip method="MAN" source="cadastro" age="há 3 dias" stale />
+      <div className="sur" style={{minWidth:210}}><ProvenancePanel rows={[['Origem','coletor NSX · API'],['Última coleta','há 7 min'],['Método · confiança','OBS · 84%'],['Responsável','Eng. de Redes']]} /></div>
+    </div>
+    <div className="k">domaintile — frota</div>
+    <div style={{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:8}}>
+      <DomainTile code="TESP07" state="crit" days="38 d" note="NSX T1 · plano aberto" usagePct={97} env="prod" selected />
+      <DomainTile code="TESP02" state="warn" days="71 d" note="link internet" usagePct={86} env="prod" />
+      <DomainTile code="TECE01" state="ok" days="180 d" note="estável" usagePct={62} env="prod" />
+      <DomainTile code="TEBH01" state="nocollect" days="—" note="sem coleta há 26 h" usagePct={0} env="cont" />
+    </div>
+  </div>;
+}
+ReactDOM.createRoot(document.getElementById('root')).render(<Card />);
+</script>
+</body></html>
