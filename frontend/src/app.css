@@ -1,0 +1,124 @@
+/* CITADEL — layout e composições do app.
+   Tokens (cores, tipo, espaçamento, efeitos) vêm de @ds/styles.css.
+   Aqui só entram classes de layout (login 4b, shell 5a) e composições
+   que o DS ainda não tem (banner, toggle, área de texto, chat). */
+
+*,*::before,*::after{box-sizing:border-box}
+html,body,#root{min-height:100%}
+body{margin:0;background:var(--bg-page);color:var(--ink);font:var(--weight-regular) var(--text-body)/var(--text-body-lh) var(--font-ui);-webkit-font-smoothing:antialiased}
+button,input,select,textarea{font-family:inherit;color:inherit}
+a{color:var(--link);text-decoration:none}
+a:hover{color:var(--link-hover);text-decoration:underline}
+:focus-visible{outline:var(--focus-outline);outline-offset:var(--focus-offset)}
+::selection{background:var(--selection)}
+::-webkit-scrollbar{width:9px;height:9px}
+::-webkit-scrollbar-thumb{background:var(--hairline);border-radius:var(--radius-md)}
+p,h1,h2,h3{margin:0}
+
+.app{min-height:100vh;background:var(--bg-page);color:var(--ink);color-scheme:light}
+.app[data-theme="dark"]{color-scheme:dark}
+
+/* ---- papéis tipográficos ---- */
+.num{font-family:var(--font-mono);font-feature-settings:var(--tnum)}
+.cap{font:var(--weight-semibold) var(--text-caption)/var(--text-caption-lh) var(--font-ui);letter-spacing:var(--tracking-caps);text-transform:uppercase;color:var(--text-muted)}
+.wordmark{font:var(--weight-bold) 1em/1 var(--font-brand);letter-spacing:var(--tracking-brand);color:var(--brand)}
+.title{font:var(--weight-bold) var(--text-h3)/var(--text-h3-lh) var(--font-brand);color:var(--brand)}
+.hero{font-family:var(--font-ui);font-weight:var(--weight-bold);font-stretch:var(--brand-stretch);font-feature-settings:var(--tnum);line-height:.9}
+.muted{color:var(--text-muted)}
+.faint{color:var(--text-faint)}
+.sm{font-size:var(--text-sm)}
+.xs{font-size:var(--text-xs)}
+
+/* ---- login (tela 4b) ---- */
+.login{display:grid;grid-template-columns:minmax(0,1fr) 556px;min-height:100vh}
+.login-panel{
+  /* única exceção a "sem gradiente": painel escuro do login (readme do DS) — paleta NOC fixa */
+  --p-ink:#E7ECF3;--p-sub:#9FB2C4;--p-cap:#8299B0;--p-mut:#7A8FA3;--p-hair:#1D3448;
+  --p-amber:#F0B45F;--p-ok:#8FD0A9;--p-cyan:#7FC7E8;--p-gold:#D9B36C;
+  background:linear-gradient(160deg,#041C2B 0%,#0A2438 100%);color:var(--p-ink);
+  padding:var(--space-10) var(--space-12);display:flex;flex-direction:column;justify-content:space-between;gap:var(--space-5);min-width:0}
+.login-panel .cap{color:var(--p-cap)}
+.login-panel .wordmark{color:var(--p-ink)}
+.login-form{background:var(--surface);display:flex;flex-direction:column;justify-content:space-between;gap:var(--space-5);padding:var(--space-8) var(--space-12)}
+.login-stats{display:flex;border-top:1px solid var(--p-hair);border-bottom:1px solid var(--p-hair);padding:var(--space-4) 0}
+.login-stats>div{flex:1;padding:0 var(--space-4);border-left:1px solid var(--p-hair)}
+.login-stats>div:first-child{padding-left:0;border-left:0}
+.hr{display:flex;align-items:center;gap:var(--space-3);color:var(--text-muted);font-size:var(--text-xs)}
+.hr::before,.hr::after{content:"";flex:1;height:1px;background:var(--hairline)}
+.kv{display:grid;grid-template-columns:1fr auto;gap:7px var(--space-3);font-size:12px}
+.kv>:nth-child(odd){color:var(--text-muted)}
+.kv>:nth-child(even){font-family:var(--font-mono);font-feature-settings:var(--tnum);text-align:right}
+@media (max-width:1100px){.login{grid-template-columns:minmax(0,1fr)}}
+
+/* ---- shell (layout 5a: sidebar 228 + painel + rail 316) ---- */
+.shell{display:grid;grid-template-columns:var(--sidebar-w) minmax(0,1fr) var(--rail-w);min-height:100vh}
+.shell.norail{grid-template-columns:var(--sidebar-w) minmax(0,1fr)}
+.shell.norail .rail{display:none}
+.sidebar{background:var(--surface);border-right:var(--border-hairline);display:flex;flex-direction:column;position:sticky;top:0;height:100vh}
+.sidebar-head{padding:var(--space-4) var(--space-4) 13px;border-bottom:var(--border-hairline)}
+.sidebar nav{padding-top:var(--space-2);flex:1;overflow-y:auto}
+.sidebar-foot{border-top:var(--border-hairline);padding:var(--space-3) var(--space-4);display:flex;flex-direction:column;gap:10px}
+.main{min-width:0;display:flex;flex-direction:column}
+.topbar{min-height:var(--topbar-h);padding:var(--space-3) var(--page-pad);border-bottom:var(--border-hairline);background:var(--surface);position:sticky;top:0;z-index:2;display:flex;align-items:center;gap:var(--space-3)}
+.content{padding:var(--space-5) var(--page-pad) var(--space-10);flex:1;min-width:0}
+.rail{border-left:var(--border-hairline);background:var(--surface);padding:var(--space-5);position:sticky;top:0;height:100vh;display:flex;flex-direction:column;gap:var(--space-5)}
+/* abaixo de 1280 (mínimo do layout 5a no kit) o rail sai; acima, o toggle ◧ decide */
+@media (max-width:1279px){.shell{grid-template-columns:var(--sidebar-w) minmax(0,1fr)}.shell .rail{display:none}}
+
+.nav-item{display:grid;grid-template-columns:1fr auto;gap:0 var(--space-2);align-items:baseline;width:100%;text-align:left;padding:var(--space-2) var(--space-4);border:0;background:transparent;cursor:pointer;font:var(--weight-medium) 13px/1.35 var(--font-ui);color:var(--ink);transition:background var(--motion-fast) var(--ease)}
+.nav-item:hover{background:var(--selection)}
+.nav-item[aria-current="page"]{background:var(--selection);box-shadow:inset 2px 0 var(--action);font-weight:var(--weight-semibold);color:var(--brand)}
+.nav-item small{grid-column:1/2;font-size:var(--text-caption);color:var(--text-muted);font-weight:var(--weight-regular)}
+.nav-item .count{font-family:var(--font-mono);font-size:var(--text-caption);color:var(--text-muted);font-weight:var(--weight-regular)}
+.nav-item .count.hot{color:var(--state-warn)}
+.nav-item.meistre{width:auto;margin:0 calc(-1 * var(--space-2));padding:6px var(--space-2);border-radius:var(--radius-md);color:var(--action);font-weight:var(--weight-semibold)}
+.avatar{width:24px;height:24px;border-radius:50%;background:var(--selection);color:var(--brand);font:var(--weight-semibold) 10px var(--font-ui);display:flex;align-items:center;justify-content:center;flex:none}
+
+/* ---- cards e grades ---- */
+.card{background:var(--surface);border:var(--border-hairline);border-radius:var(--radius-md);padding:var(--space-4) 18px}
+.card.mock{border-style:dashed;border-color:var(--dq-estimated)}      /* EST · mock — dado simulado */
+.card.nocollect{border-style:dotted;border-color:var(--state-nocollect)} /* sem coleta */
+.card.flush{padding:0;overflow:hidden}
+.card-head{display:flex;justify-content:space-between;align-items:baseline;gap:var(--space-3);flex-wrap:wrap}
+.card.flush .card-head{padding:15px 18px 10px}
+.card-foot{padding:10px 18px 14px;font:var(--weight-regular) var(--text-xs) var(--font-mono);color:var(--text-muted)}
+.stack{display:grid;gap:14px}
+.cols-2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}
+.cols-3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}
+.tiles{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:12px}
+.row{display:flex;align-items:center;gap:var(--space-2);flex-wrap:wrap}
+.tscroll{overflow-x:auto}
+.list>*+*{border-top:var(--border-hairline)}
+.metric-row{display:flex;align-items:baseline;gap:12px;margin-top:10px}
+
+/* ---- composições ausentes no DS ---- */
+/* banner de alerta: glifo + cor + texto (nunca só cor); --b-color/--b-bg vêm de STATUS_STATES */
+.banner{display:flex;align-items:center;gap:14px;flex-wrap:wrap;padding:12px 16px;border-radius:var(--radius-md);border:1px solid var(--b-color);background:var(--b-bg);color:var(--ink)}
+.banner .glyph{font-family:var(--font-mono);font-size:15px;color:var(--b-color)}
+/* filtro liga/desliga (meses, expurgo) */
+.toggle{font:var(--weight-medium) var(--text-xs) var(--font-ui);padding:5px 11px;border-radius:var(--radius-sm);cursor:pointer;border:var(--border-hairline);background:var(--surface);color:var(--text-muted);transition:background var(--motion-fast) var(--ease)}
+.toggle:hover{background:var(--selection)}
+.toggle[aria-pressed="true"]{border-color:var(--action);background:var(--selection);color:var(--action)}
+/* segmentado PT/EN e botão de ícone (tema, rail) */
+.seg{display:inline-flex;gap:2px;border:var(--border-hairline);border-radius:var(--radius-md);padding:2px}
+.seg button{border:0;background:transparent;cursor:pointer;font:var(--weight-semibold) var(--text-caption) var(--font-mono);letter-spacing:.08em;padding:3px 8px;border-radius:var(--radius-sm);color:var(--ink)}
+.seg button[aria-pressed="true"]{background:var(--selection)}
+.iconbtn{border:var(--border-hairline);background:transparent;color:var(--ink);border-radius:var(--radius-md);padding:3px 9px;cursor:pointer;font:var(--weight-semibold) 11px var(--font-mono);transition:background var(--motion-fast) var(--ease)}
+.iconbtn:hover,.iconbtn[aria-pressed="true"]{background:var(--selection)}
+/* ausência de dado é estado: borda pontilhada + ◌ */
+.nodata{display:grid;place-items:center;color:var(--state-nocollect);border:1px dotted var(--state-nocollect);border-radius:var(--radius-md);font:var(--weight-regular) 12px var(--font-mono)}
+/* área de texto no molde do TextField do DS */
+.field{display:block}
+.field>span{display:block;font:var(--weight-semibold) var(--text-caption) var(--font-ui);letter-spacing:.06em;text-transform:uppercase;color:var(--text-muted);margin-bottom:5px}
+.field textarea{width:100%;border:var(--border-hairline);border-radius:var(--radius-md);padding:9px 12px;font:var(--weight-regular) 13px/1.5 var(--font-mono);color:var(--ink);background:var(--surface);resize:vertical}
+/* runway selecionável (Três Olhos) */
+.runway{cursor:pointer;padding:6px 10px;margin:0 -10px;border-radius:var(--radius-md);transition:background var(--motion-fast) var(--ease)}
+.runway:hover{background:var(--bg-page)}
+.runway[aria-selected="true"]{background:var(--selection);box-shadow:inset 2px 0 var(--action)}
+/* chat do Meistre */
+.chat{min-height:220px;display:flex;flex-direction:column;gap:12px}
+.bubble{max-width:82%;border:var(--border-hairline);border-radius:8px;padding:9px 13px;font-size:var(--text-sm);white-space:pre-wrap;line-height:1.55}
+.bubble.user{align-self:flex-end;background:var(--selection)}
+.bubble.ai{align-self:flex-start;background:var(--bg-page)}
+/* toasts (overlay — única superfície com sombra) */
+.toasts{position:fixed;right:var(--space-5);bottom:var(--space-5);z-index:50;display:grid;gap:8px}
