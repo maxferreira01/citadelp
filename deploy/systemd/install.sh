@@ -6,10 +6,10 @@
 #   1. Dependências de sistema: python3.11+, git, pango + fontes (weasyprint), node 20 — RHEL (dnf) e Ubuntu (apt)
 #   2. Usuário de sistema (default: citadel) dono do repo, data/ e relatorios/
 #   3. venv em <repo>/.venv com `pip install -e "backend[dev,bot,report]"`
-#   4. Painel: `npm ci && npm run build` em frontend/ (a API serve frontend/dist)
+#   4. Painel: `npm ci && npm run build` em frontend/ (a API serve frontend/dist na :5173, ou CITADEL_PORT do .env)
 #   5. .env a partir de .env.example se não existir (chmod 600) — EDITE os tokens
 #   6. Units systemd (bot.service, report.service, report.timer, citadel-api.service) com caminhos do repo
-#   7. daemon-reload + enable --now + smoke test (relatório --dry-run --offline; GET /healthz na :5533)
+#   7. daemon-reload + enable --now + smoke test (relatório --dry-run --offline; GET /healthz na porta do painel)
 #
 # Uso (na raiz do clone):
 #   sudo bash deploy/systemd/install.sh                 # usuário 'citadel'
@@ -105,6 +105,10 @@ for v in SLACK_BOT_TOKEN SLACK_APP_TOKEN; do
     fi
 done
 
+# porta do painel: CITADEL_PORT do .env, senão o default da unit (5173)
+PORTA=$(sed -n 's/^CITADEL_PORT=["\x27]\?\([0-9]\+\).*/\1/p' "$REPO/.env" 2>/dev/null | tail -1)
+PORTA=${PORTA:-5173}
+
 log "Units systemd"
 for u in "${UNITS[@]}"; do
     sed -e "s#__REPO__#${REPO}#g" -e "s#__USER__#${CORVO_USER}#g" "$REPO/deploy/systemd/$u" \
@@ -122,7 +126,7 @@ else
 fi
 if [ "${CITADEL_PANEL:-1}" = "1" ]; then
     systemctl enable citadel-api.service >/dev/null 2>&1
-    systemctl restart citadel-api.service && ok "citadel-api (re)iniciada na :5533"
+    systemctl restart citadel-api.service && ok "citadel-api (re)iniciada na :${PORTA}"
     for v in CITADEL_INFLUX_TOKEN CITADEL_CHECKMK_SITES; do
         grep -qE "^${v}=." "$REPO/.env" && ! grep -qE "^${v}=TROQUE-ME" "$REPO/.env" || warn "$v vazio no .env — Três Olhos/Vigia mostram 'indisponível' até preencher"
     done
@@ -133,14 +137,14 @@ sudo -u "$CORVO_USER" "$REPO/.venv/bin/python" "$REPO/collectors/corvo_datadog_r
     --offline --dry-run --no-pdf >/dev/null && ok "relatório offline gerado em $REPO/relatorios/corvo-datadog/"
 if [ "${CITADEL_PANEL:-1}" = "1" ]; then
     sleep 2
-    if curl -fsS http://127.0.0.1:5533/healthz >/dev/null 2>&1; then
-        ok "API responde em http://127.0.0.1:5533/healthz"
-        [ -f "$REPO/frontend/dist/index.html" ] && ok "painel em http://$(hostname -I 2>/dev/null | awk '{print $1}'):5533/"
-        if command -v firewall-cmd >/dev/null 2>&1 && firewall-cmd --state >/dev/null 2>&1 && ! firewall-cmd --list-ports | grep -q 5533; then
-            warn "firewalld ativo sem a 5533: firewall-cmd --add-port=5533/tcp --permanent && firewall-cmd --reload"
+    if curl -fsS "http://127.0.0.1:${PORTA}/healthz" >/dev/null 2>&1; then
+        ok "API responde em http://127.0.0.1:${PORTA}/healthz"
+        [ -f "$REPO/frontend/dist/index.html" ] && ok "painel em http://$(hostname -I 2>/dev/null | awk '{print $1}'):${PORTA}/"
+        if command -v firewall-cmd >/dev/null 2>&1 && firewall-cmd --state >/dev/null 2>&1 && ! firewall-cmd --list-ports | grep -q "${PORTA}"; then
+            warn "firewalld ativo sem a ${PORTA}: firewall-cmd --add-port=${PORTA}/tcp --permanent && firewall-cmd --reload"
         fi
     else
-        warn "API não respondeu na :5533 — journalctl -u citadel-api -n 30"
+        warn "API não respondeu na :${PORTA} — journalctl -u citadel-api -n 30"
     fi
 fi
 

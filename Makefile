@@ -5,8 +5,8 @@ lint:             ## ruff check + format
 	ruff check backend && ruff format --check backend
 test:             ## testes do backend
 	pytest backend -q
-run:              ## API local
-	uvicorn app.main:app --app-dir backend --reload --port 8000
+run:              ## API local (5533 = alvo do proxy do Vite em dev)
+	uvicorn app.main:app --app-dir backend --reload --port 5533
 scan:             ## caça segredos no working tree
 	gitleaks detect --no-git -v || true
 build-front:      ## build do frontend

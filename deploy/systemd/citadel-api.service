@@ -1,7 +1,7 @@
-# CITADEL — API + painel (uvicorn na :5533; a API serve o frontend/dist e aceita /api/*).
+# CITADEL — API + painel (uvicorn na :5173; a API serve o frontend/dist e aceita /api/*).
 # Instalado por deploy/systemd/install.sh; caminhos são substituídos (__REPO__, __USER__).
 [Unit]
-Description=CITADEL API + painel (uvicorn :5533)
+Description=CITADEL API + painel (uvicorn :5173)
 After=network-online.target
 Wants=network-online.target
 
@@ -10,10 +10,12 @@ Type=simple
 User=__USER__
 Group=__USER__
 WorkingDirectory=__REPO__
-EnvironmentFile=__REPO__/.env
+# Environment= vem ANTES do EnvironmentFile= de propósito: assim o .env pode sobrescrever.
 Environment=CITADEL_STATIC_DIR=__REPO__/frontend/dist
+Environment=CITADEL_PORT=5173
+EnvironmentFile=__REPO__/.env
 # python -m (e não o script .venv/bin/uvicorn): o shebang do script quebra se o repo for movido/renomeado
-ExecStart=__REPO__/.venv/bin/python -m uvicorn app.main:app --app-dir __REPO__/backend --host 0.0.0.0 --port 5533
+ExecStart=__REPO__/.venv/bin/python -m uvicorn app.main:app --app-dir __REPO__/backend --host 0.0.0.0 --port ${CITADEL_PORT}
 Restart=always
 RestartSec=5
 # venv, dados e snapshots ficam dentro do repo; nada mais é gravado

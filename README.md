@@ -14,7 +14,7 @@ Módulos: **Conselho** (visão executiva) · **Três Olhos** (capacidade e previ
 | `backend/` | FastAPI: parser do Corvo + **gateway federado do Checkmk** (hosts, discovery, activate, downtimes, downtime em lote por RDM) | código de produção, testado |
 | `collectors/` | Scanner do canal `#alert-float-ip` (Slack API → JSON) · **Corvo · Datadog**: relatório diário do `#datadog-redes` (DM + PDF) e bot de consulta em Socket Mode ([runbook](docs/runbook-corvo-datadog.md)) | produção · novo (ago/2026) |
 | `deploy/k8s/` | Deployment/Service da API (imagem já leva o painel) + CronJob do scanner | base |
-| `deploy/systemd/` | Units + install.sh para a dev-redes: Corvo · Datadog (bot + timer) e **`citadel-api.service`** (API + painel na :5533) | produção · painel novo (set/2026) |
+| `deploy/systemd/` | Units + install.sh para a dev-redes: Corvo · Datadog (bot + timer) e **`citadel-api.service`** (API + painel na :5173) | produção · painel novo (set/2026) |
 
 ## Desenvolvimento
 
@@ -24,7 +24,7 @@ make setup                  # backend editable + pre-commit hooks
 make lint && make test      # mesmo gate do CI
 make run                    # API em http://localhost:8000/docs
 make build-front            # SPA (Vite)
-cd frontend && npm run dev  # SPA em dev (proxy /api → :5533)
+cd frontend && npm run dev  # SPA em dev na :5173 (proxy /api → API local da :5533)
 ```
 
 O `design-system/` fica **fora da raiz do Vite** de propósito (é um entregável
@@ -48,13 +48,20 @@ cd /opt/citadelp && git pull && sudo bash deploy/systemd/install.sh
 ```
 
 O `install.sh` instala Node 20, faz `npm ci && npm run build`, instala e reinicia
-`citadel-api.service` (uvicorn `0.0.0.0:5533`) e testa `GET /healthz`. Painel em
-`http://<dev-redes>:5533/`. Preencher antes no `.env`: `CITADEL_INFLUX*` e
+`citadel-api.service` (uvicorn `0.0.0.0:5173`) e testa `GET /healthz`. Painel em
+`http://<dev-redes>:5173/` — a porta é o link que a equipe já usa; `CITADEL_PORT`
+no `.env` sobrescreve. Preencher antes no `.env`: `CITADEL_INFLUX*` e
 `CITADEL_NSX_SITE_ALIASES` (Três Olhos/Muralha), `CITADEL_CHECKMK_SITES` (Vigia);
 `GOOGLE_CLIENT_ID` é opcional. `CITADEL_PANEL=0` instala só o Corvo.
 
 **Imagem (k8s)** — `backend/Dockerfile` é multi-stage com contexto na raiz:
 builda o painel e o embute em `/srv/frontend/dist`; `release.yml` já aponta.
+
+⚠ **Duas portas, dois papéis.** Em produção a API+painel ocupa a **5173** (o link
+conhecido). Em desenvolvimento, `npm run dev` também usa a 5173 no *seu* laptop e
+manda `/api` para a API local na **5533** (`make run`) — não há conflito porque são
+máquinas diferentes, mas **não rode `npm run dev` na dev-redes**: colide com o
+serviço. Um Vite esquecido lá ficou servindo build velho de 29/07 a 03/09/2026.
 
 ⚠ Os endpoints de mutação do Checkmk (`POST/DELETE /checkmk/...`) não têm
 autenticação própria: o serviço deve ficar restrito à rede de gerência.
