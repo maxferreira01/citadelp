@@ -30,7 +30,9 @@ jobs:
             type=sha
       - uses: docker/build-push-action@v6
         with:
-          context: backend
+          # contexto = raiz: o Dockerfile builda o painel (frontend + design-system) e o embute na imagem
+          context: .
+          file: backend/Dockerfile
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}

@@ -1,26 +1,30 @@
 #!/usr/bin/env bash
-# install.sh — instala/atualiza o Corvo · Datadog (bot + relatório diário) numa dev-redes.
+# install.sh — instala/atualiza o CITADEL numa dev-redes: Corvo · Datadog (bot + relatório
+# diário) e o PAINEL (API + SPA na :5533).
 #
 # O que faz (idempotente; re-rode após `git pull`):
-#   1. Dependências de sistema: python3.11+, git, pango + fontes (weasyprint) — RHEL (dnf) e Ubuntu (apt)
+#   1. Dependências de sistema: python3.11+, git, pango + fontes (weasyprint), node 20 — RHEL (dnf) e Ubuntu (apt)
 #   2. Usuário de sistema (default: citadel) dono do repo, data/ e relatorios/
 #   3. venv em <repo>/.venv com `pip install -e "backend[dev,bot,report]"`
-#   4. .env a partir de .env.example se não existir (chmod 600) — EDITE os tokens
-#   5. Units systemd (bot.service, report.service, report.timer) com caminhos do repo
-#   6. daemon-reload + enable --now + smoke test (--dry-run --offline)
+#   4. Painel: `npm ci && npm run build` em frontend/ (a API serve frontend/dist)
+#   5. .env a partir de .env.example se não existir (chmod 600) — EDITE os tokens
+#   6. Units systemd (bot.service, report.service, report.timer, citadel-api.service) com caminhos do repo
+#   7. daemon-reload + enable --now + smoke test (relatório --dry-run --offline; GET /healthz na :5533)
 #
 # Uso (na raiz do clone):
 #   sudo bash deploy/systemd/install.sh                 # usuário 'citadel'
 #   sudo CORVO_USER=maxferreira bash deploy/systemd/install.sh
+#   sudo CITADEL_PANEL=0 bash deploy/systemd/install.sh  # só o Corvo, sem painel/API
 #
-# Atualizar: git pull && sudo bash deploy/systemd/install.sh   (reinicia o bot)
+# Atualizar: git pull && sudo bash deploy/systemd/install.sh   (reinicia o bot e a API — fora das 08:00)
 
 set -euo pipefail
 
 REPO=$(cd "$(dirname "$0")/../.." && pwd)
 CORVO_USER="${CORVO_USER:-citadel}"
 PY="${PYTHON:-}"
-UNITS=(corvo-datadog-bot.service corvo-datadog-report.service corvo-datadog-report.timer)
+PANEL="${CITADEL_PANEL:-1}"
+UNITS=(corvo-datadog-bot.service corvo-datadog-report.service corvo-datadog-report.timer citadel-api.service)
 
 log()  { echo -e "\n\033[1;36m==> $*\033[0m"; }
 ok()   { echo -e "    \033[0;32m[OK]\033[0m $*"; }
@@ -45,6 +49,20 @@ else
 fi
 "$PY" -c 'import sys; assert sys.version_info >= (3, 11), sys.version' || { err "precisa de Python >= 3.11 ($PY)"; exit 1; }
 ok "python: $PY"
+if [ "$PANEL" = "1" ]; then
+    if ! command -v node >/dev/null 2>&1 || [ "$(node -p 'process.versions.node.split(".")[0]')" -lt 18 ]; then
+        if command -v dnf >/dev/null 2>&1; then
+            dnf module install -y -q nodejs:20/common 2>/dev/null || dnf install -y -q nodejs npm || warn "node não instalado"
+        else
+            apt-get install -y -qq nodejs npm || warn "node não instalado"
+        fi
+    fi
+    if command -v node >/dev/null 2>&1 && [ "$(node -p 'process.versions.node.split(".")[0]')" -ge 18 ]; then
+        ok "node: $(node -v)"
+    else
+        warn "node >= 18 ausente — painel NÃO será buildado (a API sobe sem estático)"; PANEL=0
+    fi
+fi
 
 log "Usuário $CORVO_USER e permissões"
 id "$CORVO_USER" >/dev/null 2>&1 || useradd --system --create-home --shell /sbin/nologin "$CORVO_USER"
@@ -62,6 +80,15 @@ if sudo -u "$CORVO_USER" "$REPO/.venv/bin/python" -c 'import weasyprint' 2>/dev/
     ok "weasyprint ok (PDF)"
 else
     warn "weasyprint não importa (pango?) — relatório sai em HTML até resolver"
+fi
+
+if [ "$PANEL" = "1" ]; then
+    log "Painel: build do frontend (Vite) em $REPO/frontend/dist"
+    if (cd "$REPO/frontend" && sudo -u "$CORVO_USER" npm ci --no-audit --no-fund --silent && sudo -u "$CORVO_USER" npm run build --silent); then
+        ok "dist gerado ($(du -sh "$REPO/frontend/dist" | cut -f1))"
+    else
+        warn "build do frontend falhou — a API sobe sem o painel; rode 'npm run build' em frontend/ e reinicie citadel-api"
+    fi
 fi
 
 log "Configuração $REPO/.env"
@@ -93,14 +120,33 @@ if grep -qE "^SLACK_APP_TOKEN=xapp-[A-Za-z0-9-]{10,}" "$REPO/.env"; then
 else
     warn "bot NÃO iniciado: preencha SLACK_APP_TOKEN e rode: systemctl enable --now corvo-datadog-bot"
 fi
+if [ "${CITADEL_PANEL:-1}" = "1" ]; then
+    systemctl enable citadel-api.service >/dev/null 2>&1
+    systemctl restart citadel-api.service && ok "citadel-api (re)iniciada na :5533"
+    for v in CITADEL_INFLUX_TOKEN CITADEL_CHECKMK_SITES; do
+        grep -qE "^${v}=." "$REPO/.env" && ! grep -qE "^${v}=TROQUE-ME" "$REPO/.env" || warn "$v vazio no .env — Três Olhos/Vigia mostram 'indisponível' até preencher"
+    done
+fi
 
 log "Smoke test (offline, sem postar)"
 sudo -u "$CORVO_USER" "$REPO/.venv/bin/python" "$REPO/collectors/corvo_datadog_report.py" \
     --offline --dry-run --no-pdf >/dev/null && ok "relatório offline gerado em $REPO/relatorios/corvo-datadog/"
+if [ "${CITADEL_PANEL:-1}" = "1" ]; then
+    sleep 2
+    if curl -fsS http://127.0.0.1:5533/healthz >/dev/null 2>&1; then
+        ok "API responde em http://127.0.0.1:5533/healthz"
+        [ -f "$REPO/frontend/dist/index.html" ] && ok "painel em http://$(hostname -I 2>/dev/null | awk '{print $1}'):5533/"
+        if command -v firewall-cmd >/dev/null 2>&1 && firewall-cmd --state >/dev/null 2>&1 && ! firewall-cmd --list-ports | grep -q 5533; then
+            warn "firewalld ativo sem a 5533: firewall-cmd --add-port=5533/tcp --permanent && firewall-cmd --reload"
+        fi
+    else
+        warn "API não respondeu na :5533 — journalctl -u citadel-api -n 30"
+    fi
+fi
 
 log "Pronto"
 systemctl list-timers 'corvo-datadog-*' --no-pager || true
-systemctl --no-pager --lines=0 status corvo-datadog-bot.service 2>/dev/null | head -3 || true
+systemctl --no-pager --lines=0 status corvo-datadog-bot.service citadel-api.service 2>/dev/null | grep -E "●|Active" || true
 echo "    Próximos passos: convidar o bot no #datadog-redes, rodar o 1º scan"
 echo "    (sudo -u $CORVO_USER $REPO/.venv/bin/python collectors/corvo_datadog_report.py --dry-run --scan-days 30)"
 echo "    e testar o envio: ... --send --to <seu U…>"

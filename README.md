@@ -13,8 +13,8 @@ Módulos: **Conselho** (visão executiva) · **Três Olhos** (capacidade e previ
 | `frontend/` | SPA completa (login 4b → shell 5a → módulos), **sobre o design system**: tokens + componentes de `@ds`, composições próprias em `src/ui.jsx`, uma pasta por tela (`screens/`) e por módulo (`modules/`) | Corvo com dados **OBS** reais da varredura do Slack; demais módulos **EST · mock sinalizado** |
 | `backend/` | FastAPI: parser do Corvo + **gateway federado do Checkmk** (hosts, discovery, activate, downtimes, downtime em lote por RDM) | código de produção, testado |
 | `collectors/` | Scanner do canal `#alert-float-ip` (Slack API → JSON) · **Corvo · Datadog**: relatório diário do `#datadog-redes` (DM + PDF) e bot de consulta em Socket Mode ([runbook](docs/runbook-corvo-datadog.md)) | produção · novo (ago/2026) |
-| `deploy/k8s/` | Deployment/Service da API + CronJob do scanner | base |
-| `deploy/systemd/` | Units + install.sh do Corvo · Datadog para a dev-redes | novo |
+| `deploy/k8s/` | Deployment/Service da API (imagem já leva o painel) + CronJob do scanner | base |
+| `deploy/systemd/` | Units + install.sh para a dev-redes: Corvo · Datadog (bot + timer) e **`citadel-api.service`** (API + painel na :5533) | produção · painel novo (set/2026) |
 
 ## Desenvolvimento
 
@@ -32,6 +32,32 @@ próprio, com specimens e skill). O `frontend/vite.config.js` resolve `@ds` para
 ele, dedupa `react`/`react-dom` (os componentes do DS importam React de fora de
 `frontend/`) e libera `server.fs.allow`. Regras de uso em
 [`design-system/readme.md`](design-system/readme.md#uso-no-app-citadelpfrontend).
+
+## Painel no ar (API + SPA)
+
+A própria API serve o build do Vite: `backend/app/main.py` monta `frontend/dist`
+em `/` (quando a pasta existe; `CITADEL_STATIC_DIR` sobrescreve) e aceita
+**`/api/<rota>` como sinônimo de `/<rota>`** — a SPA chama `/api/...` (mesmo
+caminho do proxy de dev), enquanto consumidores externos (p3kill, scripts) seguem
+chamando a raiz. `/docs` e as rotas têm precedência sobre o estático.
+
+**dev-redes (TESP6, onde já roda o Corvo)** — como usuário `citadel`, fora da janela das 08:00:
+
+```bash
+cd /opt/citadelp && git pull && sudo bash deploy/systemd/install.sh
+```
+
+O `install.sh` instala Node 20, faz `npm ci && npm run build`, instala e reinicia
+`citadel-api.service` (uvicorn `0.0.0.0:5533`) e testa `GET /healthz`. Painel em
+`http://<dev-redes>:5533/`. Preencher antes no `.env`: `CITADEL_INFLUX*` e
+`CITADEL_NSX_SITE_ALIASES` (Três Olhos/Muralha), `CITADEL_CHECKMK_SITES` (Vigia);
+`GOOGLE_CLIENT_ID` é opcional. `CITADEL_PANEL=0` instala só o Corvo.
+
+**Imagem (k8s)** — `backend/Dockerfile` é multi-stage com contexto na raiz:
+builda o painel e o embute em `/srv/frontend/dist`; `release.yml` já aponta.
+
+⚠ Os endpoints de mutação do Checkmk (`POST/DELETE /checkmk/...`) não têm
+autenticação própria: o serviço deve ficar restrito à rede de gerência.
 
 ## Gateway Checkmk (sites descentralizados)
 
