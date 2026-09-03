@@ -136,16 +136,8 @@ const ACTIONS = [
 ];
 
 /* TRÊS OLHOS / MURALHA / DOMÍNIOS / TESOURO / ARQUIVO — EST · mock.          */
-const CAPACITY = [
-  { id: "nsxt1", name: "NSX T1 Gateways · TESP07", usage: 184, op: 190, tech: 200, days: 38, conf: "84%", st: "crit", hist: [152, 154, 158, 163, 168, 172, 176, 181, 184], proj: [184, 190, 197, 205] },
-  { id: "ipset", name: "NSX IP Set · TESP02", usage: 8106, op: 9200, tech: 9600, days: 132, conf: "91%", st: "warn", hist: [6100, 6400, 6700, 7000, 7280, 7520, 7740, 7940, 8106], proj: [8106, 8420, 8760, 9110] },
-  { id: "lsp", name: "Logical Switch Ports · TESP02", usage: 20626, op: 24500, tech: 26000, days: 156, conf: "88%", st: "warn", hist: [15300, 16000, 16800, 17500, 18200, 18900, 19500, 20100, 20626], proj: [20626, 21400, 22250, 23150] },
-  { id: "nat", name: "NSX NAT Rules · TESP03", usage: 17097, op: 25000, tech: 30000, days: 310, conf: "79%", st: "ok", hist: [11800, 12400, 13000, 13600, 14300, 14900, 15600, 16350, 17097], proj: [17097, 17800, 18540, 19300] },
-  { id: "fw", name: "FW físico — memória · TESP04", usage: 69.5, op: 85, tech: 100, days: null, conf: "—", st: "stale", hist: [58, 61, 66, 63, 70, 65, 72, 68, 69.5], proj: [69.5, 71, 72.5, 74] },
-  { id: "aci", name: "ACI MAC_PER_IP · TESP02", usage: 0, op: 9200, tech: 10000, days: null, conf: "—", st: "nocollect", hist: [], proj: [] },
-];
 const LIMITS = [
-  { plat: "NSX-T", res: "Tier-1 Routers", edge: "TESP07", use: 184, op: 190, vendor: 4000, src: "premissa arquitetura" },
+  // NSX-T · Tier-1 Routers: linhas reais por site via /nsx/t1/resumo (Muralha).
   { plat: "NSX-T", res: "NAT Rules", edge: "TESP03", use: 17097, op: 25000, vendor: 30000, src: "config-max VMware" },
   { plat: "Palo Alto", res: "Sessões vsys1", edge: "TESP02", use: 690000, op: 2000000, vendor: 4000000, src: "datasheet PA-5260" },
   { plat: "Palo Alto", res: "Regras de firewall", edge: "TESP02", use: 48, op: 85, vendor: 100, src: "premissa (%)" },
@@ -302,10 +294,89 @@ async function api(path, opts = {}) {
   return res.json();
 }
 
+/* NSX T1 — OBS · nsx-collector → InfluxDB (read-model /nsx/t1/*).            */
+/* Limite operacional de T1: 2.000 por datacenter (premissa MAN de arquitetura). */
+const NSX_T1_OP_LIMIT = 2000;
+/* Regressão linear sobre o histórico diário → projeção (CALC) em 3 passos de 30 d. */
+function projetar(hist, op) {
+  const n = hist.length;
+  if (n < 7) return { proj: hist.length ? [hist[n - 1]] : [], days: null, conf: "—" };
+  const xs = hist.map((_, i) => i), mx = (n - 1) / 2, my = hist.reduce((a, b) => a + b, 0) / n;
+  let sxy = 0, sxx = 0, sst = 0;
+  xs.forEach((x, i) => { sxy += (x - mx) * (hist[i] - my); sxx += (x - mx) ** 2; sst += (hist[i] - my) ** 2; });
+  const slope = sxx ? sxy / sxx : 0, last = hist[n - 1];
+  const r2 = sst ? Math.max(0, Math.min(1, (slope * slope * sxx) / sst)) : 0;
+  const proj = [last, ...[30, 60, 90].map((d) => Math.round(last + slope * d))];
+  const days = slope > 0 && last < op ? Math.round((op - last) / slope) : null;
+  return { proj, days, conf: `${Math.round(r2 * 100)}%` };
+}
+function useNsxT1(site) {
+  const [sites, setSites] = useState([]);
+  const [data, setData] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  React.useEffect(() => {
+    let vivo = true;
+    (async () => {
+      setBusy(true); setErr("");
+      try {
+        const resumo = await api("/nsx/t1/resumo");
+        if (!vivo) return;
+        setSites(resumo);
+        const alvo = resumo.find((r) => r.site === site) || resumo[0];
+        if (!alvo) { setData(null); setBusy(false); return; }
+        const [hist, t0, vrf, eventos] = await Promise.all([
+          api(`/nsx/t1/historico?site=${encodeURIComponent(alvo.site)}&dias=90`),
+          api(`/nsx/t1/por-t0?site=${encodeURIComponent(alvo.site)}`),
+          api(`/nsx/t1/por-vrf?site=${encodeURIComponent(alvo.site)}`),
+          api(`/nsx/t1/eventos?site=${encodeURIComponent(alvo.site)}&dias=90`),
+        ]);
+        if (!vivo) return;
+        const pontos = hist.filter((h) => h.total != null);
+        const serie = pontos.map((h) => h.total);
+        const op = NSX_T1_OP_LIMIT;
+        const usage = alvo.total ?? alvo.nsx_current ?? 0;
+        const { proj, days, conf } = projetar(serie, op);
+        const st = usage >= op ? "crit" : usage >= op * 0.85 ? "warn" : "ok";
+        setData({ id: "nsxt1", name: `NSX T1 Gateways · ${alvo.site}`, site: alvo.site, usage, op, tech: null, days, conf, st, hist: serie, datas: pontos.map((h) => h.quando), eventos, proj, t0, vrf, resumo: alvo });
+      } catch (e) { if (vivo) setErr(String(e.message || e)); }
+      if (vivo) setBusy(false);
+    })();
+    return () => { vivo = false; };
+  }, [site]);
+  return { sites, data, busy, err };
+}
+/* Barras horizontais count/limit, cor por usage_pct (molde do ranking do Corvo). */
+function T1Bars({ rows, nameKey, title, semLimite }) {
+  const data = rows.map((r) => ({ k: r[nameKey], n: r.t1_count, lim: semLimite ? null : r.limit, pct: semLimite ? 0 : r.usage_pct, direto: r.t1_direct, vrf: r.t1_via_vrf }));
+  const cor = (pct) => pct >= 90 ? "var(--state-crit)" : pct >= 70 ? "var(--cap-limit-op)" : "var(--petrol-500)";
+  return (
+    <Card>
+      <div style={{ display: "flex", justifyContent: "space-between" }}><Cap>{title} — {rows.length}</Cap><Chip m="OBS" s="nsx-collector → InfluxDB" /></div>
+      {!rows.length ? <div style={{ marginTop: 10, color: "var(--state-nocollect)", fontFamily: "var(--font-mono)", fontSize: 12 }}>◌ sem coleta</div> : (
+        <div style={{ height: Math.max(120, data.length * 26 + 30), marginTop: 10 }}>
+          <ResponsiveContainer>
+            <BarChart data={data} layout="vertical" margin={{ left: 4, right: 64, top: 2, bottom: 0 }}>
+              <CartesianGrid horizontal={false} stroke="var(--hairline)" />
+              <XAxis type="number" allowDecimals={false} tick={{ fontSize: 10.5, fontFamily: "var(--font-mono)" }} stroke="var(--text-faint)" />
+              <YAxis type="category" dataKey="k" width={170} tick={{ fontSize: 10.5, fontFamily: "var(--font-mono)" }} stroke="var(--text-faint)" />
+              <Tooltip cursor={{ fill: "var(--selection)" }} contentStyle={{ fontFamily: "var(--font-mono)", fontSize: 11, border: "1px solid var(--hairline)", borderRadius: 6, background: "var(--surface)", color: "var(--ink)" }} formatter={(v, _n, it) => [`${v} de ${it.payload.lim} (${it.payload.pct} %)` + (it.payload.direto != null ? ` · ${it.payload.direto} direto + ${it.payload.vrf} em VRF` : ""), "T1"]} />
+              <Bar dataKey="n" radius={[0, 3, 3, 0]}>
+                {data.map((r, i) => <Cell key={i} fill={cor(r.pct)} />)}
+                <LabelList dataKey="n" position="right" content={({ x, y, width, height, value, index }) => <text x={x + width + 4} y={y + height / 2 + 4} style={{ fontFamily: "var(--font-mono)", fontSize: 10.5, fill: "var(--ink)" }}>{data[index].lim != null ? `${value}/${data[index].lim}` : value}</text>} />
+              </Bar>
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+      )}
+    </Card>
+  );
+}
+
 /* Trajetória — sólida=observado · tracejada=projetado · âmbar=limite op.     */
 function Trajectory({ hist, proj, op, tech, h = 150 }) {
   if (!hist.length) return <div style={{ height: h, display: "grid", placeItems: "center", color: "var(--state-nocollect)", border: "1px dotted var(--state-nocollect)", borderRadius: 6, fontFamily: "var(--font-mono)", fontSize: 12 }}>◌ sem coleta</div>;
-  const all = [...hist, ...proj, op, tech];
+  const all = [...hist, ...proj, op, ...(tech != null ? [tech] : [])];
   const min = Math.min(...all) * 0.96, max = Math.max(...all) * 1.03;
   const W = 640, n = hist.length + proj.length - 1;
   const x = (i) => 34 + (i * (W - 50)) / n;
@@ -316,32 +387,13 @@ function Trajectory({ hist, proj, op, tech, h = 150 }) {
     <svg viewBox={`0 0 ${W} ${h}`} style={{ width: "100%", height: "auto", display: "block" }} role="img" aria-label="trajetória do recurso: histórico sólido, projeção tracejada, limites operacional e técnico">
       <line x1={34} x2={W - 12} y1={y(op)} y2={y(op)} stroke="var(--cap-limit-op)" strokeDasharray="5 4" strokeWidth="1.3" />
       <text x={W - 12} y={y(op) - 4} textAnchor="end" style={{ font: "600 9.5px var(--font-mono)", fill: "var(--cap-limit-op)" }}>limite op · {fmt(op)}</text>
-      <line x1={34} x2={W - 12} y1={y(tech)} y2={y(tech)} stroke="var(--cap-limit-tech)" strokeWidth="1.3" />
-      <text x={W - 12} y={y(tech) - 4} textAnchor="end" style={{ font: "600 9.5px var(--font-mono)", fill: "var(--cap-limit-tech)" }}>limite téc · {fmt(tech)}</text>
+      {tech != null && <line x1={34} x2={W - 12} y1={y(tech)} y2={y(tech)} stroke="var(--cap-limit-tech)" strokeWidth="1.3" />}
+      {tech != null && <text x={W - 12} y={y(tech) - 4} textAnchor="end" style={{ font: "600 9.5px var(--font-mono)", fill: "var(--cap-limit-tech)" }}>limite téc · {fmt(tech)}</text>}
       <line x1={nowX} x2={nowX} y1={8} y2={h - 16} stroke="var(--ink)" strokeWidth="1" opacity=".55" />
       <text x={nowX + 4} y={16} style={{ font: "500 9.5px var(--font-mono)", fill: "var(--text-muted)" }}>hoje</text>
       <path d={path(hist)} fill="none" stroke="var(--action)" strokeWidth="2" />
       <path d={path(proj, hist.length - 1)} fill="none" stroke="var(--action)" strokeWidth="1.6" strokeDasharray="6 5" opacity=".85" />
     </svg>
-  );
-}
-function Runway({ name, usage, op, tech, days, conf, st, sel, onClick }) {
-  const pct = st === "nocollect" ? 0 : Math.min(100, (usage / tech) * 100);
-  const opPct = (op / tech) * 100;
-  return (
-    <div onClick={onClick} style={{ cursor: "pointer", padding: "7px 10px", margin: "0 -10px", borderRadius: 6, background: sel ? "var(--selection)" : "transparent", boxShadow: sel ? "inset 2px 0 var(--action)" : "none" }}>
-      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12.5, marginBottom: 5 }}>
-        <span style={{ fontWeight: sel ? 600 : 400 }}>{name}</span>
-        <span style={{ display: "inline-flex", gap: 10, alignItems: "baseline" }}>
-          <St st={st} label={st === "nocollect" ? "sem coleta 26 h" : st === "stale" ? "instável" : `${days} dias`} />
-          {conf !== "—" && <span className="num" style={{ fontSize: 10.5, color: "var(--text-faint)" }}>{conf}</span>}
-        </span>
-      </div>
-      <div style={{ position: "relative", height: 9, background: "var(--surface-sunken)", borderRadius: 4, border: st === "nocollect" ? "1px dotted var(--state-nocollect)" : "none" }}>
-        {st !== "nocollect" && <div style={{ position: "absolute", inset: "0 auto 0 0", width: pct + "%", background: "var(--action)", borderRadius: 4, opacity: .9 }} />}
-        <div style={{ position: "absolute", top: -2, bottom: -2, left: opPct + "%", width: 2, background: "var(--cap-limit-op)" }} />
-      </div>
-    </div>
   );
 }
 
@@ -525,32 +577,506 @@ function Conselho({ go }) {
   );
 }
 
-function TresOlhos() {
-  const [sel, setSel] = useState("nsxt1");
-  const r = CAPACITY.find((x) => x.id === sel);
+
+/* ---- T1 · três leituras empilhadas (candidatas) ------------------------- */
+const T0_LIMIT = 600, VRF_LIMIT = 200;
+/* Pilha de um T0: um só matiz, claro→escuro (direto, vrf_1, vrf_2…) — é parte-de-um-todo, não categoria. */
+const PILHA = ["#0E4F6E", "#3C8DAA", "#A9D3E0", "#D6E9F0"];
+const stT1 = (pct) => pct >= 100 ? "crit" : pct >= 90 ? "warn" : "ok";
+const stLabel = { crit: "no limite", warn: "atenção", ok: "folga" };
+
+/* (1) Mapa do site: um bloco por T0 (par de edges), pilha até 600, VRFs até 200. */
+function MapaSite({ site, t0, vrf }) {
+  const [hov, setHov] = useState(null);
+  const porT0 = t0.map((t) => ({ ...t, vrfs: vrf.filter((v) => v.t0_parent === t.t0_name) }));
+  const soltas = vrf.filter((v) => !t0.some((t) => t.t0_name === v.t0_parent));
+  const Segs = ({ t }) => {
+    const partes = [{ k: "direto no T0", n: t.t1_direct, c: PILHA[0] }, ...t.vrfs.map((v, i) => ({ k: v.vrf_name, n: v.t1_count, c: PILHA[Math.min(i + 1, PILHA.length - 1)] }))];
+    const esc = Math.max(T0_LIMIT, t.t1_count);
+    let acc = 0;
+    return (
+      <div style={{ position: "relative", height: 14, background: "var(--surface-sunken)", borderRadius: 4, marginTop: 8 }}>
+        {partes.filter((x) => x.n > 0).map((x, i) => { const l = (acc / esc) * 100, w = (x.n / esc) * 100; acc += x.n; return (
+          <div key={i} title={`${x.k}: ${x.n} T1`} onMouseEnter={() => setHov(`${t.t0_name} · ${x.k}: ${x.n} T1`)} onMouseLeave={() => setHov(null)}
+            style={{ position: "absolute", top: 0, bottom: 0, left: `${l}%`, width: `calc(${w}% - 2px)`, background: x.c, borderRadius: i === 0 ? "4px 0 0 4px" : 0, boxShadow: "2px 0 0 var(--surface)" }} />); })}
+        <div style={{ position: "absolute", top: -3, bottom: -3, left: `${(T0_LIMIT / esc) * 100}%`, width: 2, background: "var(--cap-limit-op)" }} title={`limite ${T0_LIMIT}`} />
+      </div>
+    );
+  };
+  return (
+    <Card>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", flexWrap: "wrap", gap: 8 }}>
+        <Cap>1 · mapa do site — T1 por par de edges (T0) e por VRF · {site}</Cap>
+        <span style={{ display: "inline-flex", gap: 6 }}><Chip m="OBS" s="per_t0 + per_vrf" /><Chip m="MAN" s="600/T0 = 200 direto + 200/VRF" /></span>
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(230px, 1fr))", gap: 12, marginTop: 12 }}>
+        {porT0.map((t) => { const st = stT1(t.usage_pct); return (
+          <div key={t.t0_name} style={{ border: "1px solid var(--hairline)", borderLeft: `3px solid ${SCOLOR[st]}`, borderRadius: 6, padding: "10px 12px" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+              <span style={{ font: "600 12.5px var(--font-ui)" }}>{t.t0_name}</span>
+              <St st={st} label={`${fmt(t.t1_count)} / ${T0_LIMIT} · ${stLabel[st]}`} />
+            </div>
+            <Segs t={t} />
+            <div style={{ display: "grid", gap: 5, marginTop: 10 }}>
+              {(() => { const pd = t.t1_direct / VRF_LIMIT; return (
+                <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 8, alignItems: "center", fontSize: 11, fontFamily: "var(--font-mono)" }}>
+                  <div>
+                    <div style={{ display: "flex", justifyContent: "space-between", color: "var(--text-muted)" }}><span>direto no T0</span><span className="num">{t.t1_direct}/{VRF_LIMIT}</span></div>
+                    <div style={{ position: "relative", height: 6, background: "var(--surface-sunken)", borderRadius: 3, marginTop: 2 }}>
+                      <div title={`direto no T0: ${t.t1_direct}/${VRF_LIMIT}`} style={{ position: "absolute", inset: "0 auto 0 0", width: `${Math.min(100, pd * 100)}%`, background: PILHA[0], borderRadius: 3 }} />
+                    </div>
+                  </div>
+                  <span aria-hidden style={{ color: SCOLOR[stT1(pd * 100)] }}>{GLYPH[stT1(pd * 100)]}</span>
+                </div>); })()}
+              {t.vrfs.map((v, i) => { const pv = v.t1_count / VRF_LIMIT; return (
+                <div key={v.vrf_name} style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 8, alignItems: "center", fontSize: 11, fontFamily: "var(--font-mono)" }}>
+                  <div>
+                    <div style={{ display: "flex", justifyContent: "space-between", color: "var(--text-muted)" }}><span title={v.parent_inferido ? "T0 pai inferido pelo nome (collector gravou '-')" : undefined}>{v.vrf_name.replace(t.t0_name + "-", "").replace(t.t0_name + "_", "")}{v.parent_inferido ? " ˙" : ""}</span><span className="num">{v.t1_count}/{VRF_LIMIT}</span></div>
+                    <div style={{ position: "relative", height: 6, background: "var(--surface-sunken)", borderRadius: 3, marginTop: 2 }}>
+                      <div title={`${v.vrf_name}: ${v.t1_count}/${VRF_LIMIT}`} style={{ position: "absolute", inset: "0 auto 0 0", width: `${Math.min(100, pv * 100)}%`, background: PILHA[Math.min(i + 1, PILHA.length - 1)], borderRadius: 3 }} />
+                    </div>
+                  </div>
+                  <span aria-hidden style={{ color: SCOLOR[stT1(pv * 100)] }}>{GLYPH[stT1(pv * 100)]}</span>
+                </div>); })}
+            </div>
+          </div>); })}
+        {soltas.length > 0 && (
+          <div style={{ border: "1px dashed var(--hairline)", borderRadius: 6, padding: "10px 12px", fontSize: 11, fontFamily: "var(--font-mono)", color: "var(--text-muted)" }}>
+            <div style={{ font: "600 12.5px var(--font-ui)", color: "var(--ink)" }}>VRFs sem T0 resolvido</div>
+            <div style={{ marginTop: 4 }}>o collector gravou t0_parent = "-" e o nome não bate com nenhum T0 do site</div>
+            {soltas.map((v) => <div key={v.vrf_name} style={{ display: "flex", justifyContent: "space-between", marginTop: 6 }}><span>{v.vrf_name}</span><span className="num">{v.t1_count}/{VRF_LIMIT}</span></div>)}
+          </div>
+        )}
+      </div>
+      <div style={{ marginTop: 10, display: "flex", gap: 14, flexWrap: "wrap", fontSize: 10.5, fontFamily: "var(--font-mono)", color: "var(--text-muted)" }}>
+        <span><i style={{ display: "inline-block", width: 10, height: 10, background: PILHA[0], borderRadius: 2, verticalAlign: -1, marginRight: 5 }} />direto no T0</span>
+        <span><i style={{ display: "inline-block", width: 10, height: 10, background: PILHA[1], borderRadius: 2, verticalAlign: -1, marginRight: 5 }} />vrf_1</span>
+        <span><i style={{ display: "inline-block", width: 10, height: 10, background: PILHA[2], borderRadius: 2, verticalAlign: -1, marginRight: 5 }} />vrf_2</span>
+        <span><i style={{ display: "inline-block", width: 2, height: 10, background: "var(--cap-limit-op)", verticalAlign: -1, marginRight: 5 }} />limite 600</span>
+        <span style={{ marginLeft: "auto" }}>{hov || " "}</span>
+      </div>
+    </Card>
+  );
+}
+
+/* (2) Medidor do parque: os 8 sites numa régua 0–2000, zona de atenção a 85 %. */
+function MedidorParque({ sites, sel, onSel }) {
+  const rows = [...sites].sort((a, b) => (b.total ?? 0) - (a.total ?? 0));
+  const esc = Math.max(NSX_T1_OP_LIMIT, ...rows.map((r) => r.total ?? 0)) * 1.06;
+  const pos = (v) => `${(v / esc) * 100}%`;
+  const total = rows.reduce((a, r) => a + (r.total ?? 0), 0);
+  return (
+    <Card>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", flexWrap: "wrap", gap: 8 }}>
+        <Cap>2 · parque — T1 por datacenter contra o limite de 2.000</Cap>
+        <span style={{ display: "inline-flex", gap: 6 }}><Chip m="OBS" s={`${rows.length} sites · ${fmt(total)} T1`} /><Chip m="MAN" s="2.000/DC · atenção a 85 %" /></span>
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "120px 1fr 96px", gap: "6px 12px", alignItems: "center", marginTop: 12 }}>
+        {rows.map((r) => { const v = r.total ?? 0, pct = (100 * v) / NSX_T1_OP_LIMIT, st = stT1(pct), ativo = r.site === sel; return (
+          <React.Fragment key={r.site}>
+            <button onClick={() => onSel(r.site)} style={{ textAlign: "left", background: "none", border: 0, padding: 0, cursor: "pointer", font: `${ativo ? 700 : 500} 12px var(--font-mono)`, color: ativo ? "var(--action)" : "var(--ink)" }}>{r.site}</button>
+            <div title={`${r.site}: ${fmt(v)} de ${fmt(NSX_T1_OP_LIMIT)} (${Math.round(pct)} %)`} style={{ position: "relative", height: 16, background: "var(--surface-sunken)", borderRadius: 4 }}>
+              <div style={{ position: "absolute", top: 0, bottom: 0, left: pos(NSX_T1_OP_LIMIT * 0.85), right: `calc(100% - ${pos(NSX_T1_OP_LIMIT)})`, background: "var(--state-warn-bg)" }} />
+              <div style={{ position: "absolute", top: 0, bottom: 0, left: pos(NSX_T1_OP_LIMIT), right: 0, background: "var(--state-crit-bg)", borderRadius: "0 4px 4px 0" }} />
+              <div style={{ position: "absolute", top: 3, bottom: 3, left: 0, width: pos(v), background: st === "ok" ? "var(--action)" : SCOLOR[st], borderRadius: "0 3px 3px 0", opacity: ativo ? 1 : .85 }} />
+              <div style={{ position: "absolute", top: -2, bottom: -2, left: pos(NSX_T1_OP_LIMIT), width: 2, background: "var(--cap-limit-op)" }} />
+            </div>
+            <St st={st} label={`${fmt(v)} · ${Math.round(pct)} %`} />
+          </React.Fragment>); })}
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "120px 1fr 96px", gap: "0 12px", marginTop: 4 }}>
+        <span /><div style={{ position: "relative", height: 12, fontSize: 9.5, fontFamily: "var(--font-mono)", color: "var(--text-faint)" }}>
+          <span style={{ position: "absolute", left: 0 }}>0</span>
+          <span style={{ position: "absolute", left: pos(NSX_T1_OP_LIMIT * 0.85), transform: "translateX(-50%)" }}>85 %</span>
+          <span style={{ position: "absolute", left: pos(NSX_T1_OP_LIMIT), transform: "translateX(-50%)", color: "var(--cap-limit-op)" }}>2.000</span>
+        </div><span />
+      </div>
+    </Card>
+  );
+}
+
+/* (3) Trajetória com os eventos (▲ created ▼ deleted) sobre a linha, 90 d. */
+function TrajetoriaEventos({ site, hist, datas, proj, op, eventos, days, conf }) {
+  const [hov, setHov] = useState(null);
+  const h = 190, W = 640;
+  if (!hist.length) return <Card><Cap>3 · trajetória · {site}</Cap><div style={{ marginTop: 10, color: "var(--state-nocollect)", fontFamily: "var(--font-mono)", fontSize: 12 }}>◌ sem coleta</div></Card>;
+  const all = [...hist, ...proj];
+  const min = Math.min(...all) * 0.985, max = Math.max(...all, op * 0.0) * 1.01;
+  const lo = Math.min(min, max - 1), hi = max;
+  const n = hist.length + proj.length - 1;
+  const x = (i) => 40 + (i * (W - 56)) / n;
+  const y = (v) => 14 + (h - 40) * (1 - (v - lo) / (hi - lo));
+  const path = (arr, off = 0) => arr.map((v, i) => `${i ? "L" : "M"}${x(i + off)},${y(v)}`).join(" ");
+  const d0 = new Date(datas[0]), d1 = new Date(datas[datas.length - 1]);
+  const idx = (iso) => { const t = new Date(iso); return Math.max(0, Math.min(hist.length - 1, Math.round(((t - d0) / (d1 - d0 || 1)) * (hist.length - 1)))); };
+  const evs = eventos.map((e) => ({ ...e, i: idx(e.quando) }));
+  const fmtD = (iso) => new Date(iso).toLocaleDateString("pt-BR", { day: "2-digit", month: "short" });
+  const opDentro = op >= lo && op <= hi;
+  return (
+    <Card>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", flexWrap: "wrap", gap: 8 }}>
+        <Cap>3 · trajetória 90 d com eventos · {site}</Cap>
+        <span style={{ display: "inline-flex", gap: 6, alignItems: "baseline" }}>
+          {days != null && <span className="num" style={{ font: "700 13px var(--font-mono)", color: "var(--cap-limit-op)" }}>{days} dias · {conf}</span>}
+          <Chip m="OBS" s={`${eventos.filter((e) => e.event === "created").length} created · ${eventos.filter((e) => e.event === "deleted").length} deleted`} /><Chip m="CALC" s="projeção linear" />
+        </span>
+      </div>
+      <svg viewBox={`0 0 ${W} ${h}`} style={{ width: "100%", height: "auto", display: "block", marginTop: 8 }} role="img" aria-label="total de T1 por dia com eventos de criação e remoção">
+        {[0, .5, 1].map((f) => { const v = lo + (hi - lo) * f; return <g key={f}><line x1={40} x2={W - 16} y1={y(v)} y2={y(v)} stroke="var(--hairline)" strokeDasharray="2 3" /><text x={36} y={y(v) + 3} textAnchor="end" style={{ font: "500 9px var(--font-mono)", fill: "var(--text-faint)" }}>{fmt(Math.round(v))}</text></g>; })}
+        {opDentro && <><line x1={40} x2={W - 16} y1={y(op)} y2={y(op)} stroke="var(--cap-limit-op)" strokeDasharray="5 4" strokeWidth="1.3" /><text x={W - 16} y={y(op) - 4} textAnchor="end" style={{ font: "600 9.5px var(--font-mono)", fill: "var(--cap-limit-op)" }}>limite op · {fmt(op)}</text></>}
+        {!opDentro && <text x={W - 16} y={12} textAnchor="end" style={{ font: "600 9.5px var(--font-mono)", fill: "var(--cap-limit-op)" }}>limite op · {fmt(op)} ↑ (faltam {fmt(op - hist[hist.length - 1])})</text>}
+        <path d={path(hist)} fill="none" stroke="var(--action)" strokeWidth="2" />
+        <path d={path(proj, hist.length - 1)} fill="none" stroke="var(--action)" strokeWidth="1.6" strokeDasharray="6 5" opacity=".8" />
+        <line x1={x(hist.length - 1)} x2={x(hist.length - 1)} y1={10} y2={h - 22} stroke="var(--ink)" opacity=".4" />
+        <text x={x(hist.length - 1) + 4} y={h - 24} style={{ font: "500 9.5px var(--font-mono)", fill: "var(--text-muted)" }}>hoje</text>
+        {evs.map((e, k) => { const cx = x(e.i), cy = y(hist[e.i]), up = e.event === "created"; return (
+          <g key={k} onMouseEnter={() => setHov(e)} onMouseLeave={() => setHov(null)} style={{ cursor: "default" }}>
+            <circle cx={cx} cy={cy} r={9} fill="transparent" />
+            <path d={up ? `M${cx},${cy - 11} l5,8 h-10 z` : `M${cx},${cy + 11} l5,-8 h-10 z`} fill={up ? "var(--state-ok)" : "var(--state-crit)"} stroke="var(--surface)" strokeWidth="1.5" />
+            <title>{`${fmtD(e.quando)} · ${e.event} · ${e.t1_name} → ${e.parent_name}`}</title>
+          </g>); })}
+        <text x={40} y={h - 6} style={{ font: "500 9.5px var(--font-mono)", fill: "var(--text-faint)" }}>{fmtD(datas[0])}</text>
+        <text x={x(hist.length - 1)} y={h - 6} textAnchor="middle" style={{ font: "500 9.5px var(--font-mono)", fill: "var(--text-faint)" }}>{fmtD(datas[datas.length - 1])}</text>
+        <text x={W - 16} y={h - 6} textAnchor="end" style={{ font: "500 9.5px var(--font-mono)", fill: "var(--text-faint)" }}>+90 d</text>
+      </svg>
+      <div style={{ marginTop: 6, display: "flex", gap: 14, flexWrap: "wrap", fontSize: 10.5, fontFamily: "var(--font-mono)", color: "var(--text-muted)" }}>
+        <span style={{ color: "var(--state-ok)" }}>▲ created</span><span style={{ color: "var(--state-crit)" }}>▼ deleted</span><span>— observado · ‒ ‒ projetado</span>
+        <span style={{ marginLeft: "auto", color: "var(--ink)" }}>{hov ? `${fmtD(hov.quando)} · ${hov.event} · ${hov.t1_name} → ${hov.parent_name} (${hov.edge_cluster_name})` : " "}</span>
+      </div>
+    </Card>
+  );
+}
+
+
+/* ---- Tabela no formato da planilha de capacity ---------------------------- */
+function TabelaT1({ site }) {
+  const [rows, setRows] = useState(null);
+  const [err, setErr] = useState("");
+  const [todos, setTodos] = useState(false);
+  React.useEffect(() => {
+    setRows(null); setErr("");
+    api("/nsx/t1/tabela" + (todos ? "" : `?site=${encodeURIComponent(site)}`)).then(setRows).catch((e) => setErr(String(e.message || e)));
+  }, [site, todos]);
+  const cols = ["Edge", "Node", "Limite-node", "vrf-number", "limite-vrf", "Dia", "Mes", "Ano", "Qtd-vrf", "Total"];
+  const csv = () => {
+    const linhas = [cols.join(";"), ...(rows || []).map((r) => [r.edge, r.node, r.limite_node ?? "", r.vrf, r.limite_vrf ?? "", r.dia, r.mes, r.ano, r.qtd, r.total_edge ?? ""].join(";"))].join("\n");
+    navigator.clipboard?.writeText(linhas);
+  };
+  return (
+    <Card style={{ padding: 0, overflow: "hidden" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "15px 18px 10px", gap: 8, flexWrap: "wrap" }}>
+        <Cap>tabela de capacity — {todos ? "todos os sites" : site}</Cap>
+        <span style={{ display: "inline-flex", gap: 8, alignItems: "center" }}>
+          <Btn sec onClick={() => setTodos((v) => !v)}>{todos ? "só este site" : "todos os sites"}</Btn>
+          <Btn sec onClick={csv} disabled={!rows}>copiar CSV (;)</Btn>
+          <Chip m="OBS" s="nsx-collector → InfluxDB" />
+        </span>
+      </div>
+      {err && <div style={{ padding: "0 18px 14px", color: "var(--state-crit)", fontSize: 12 }}>{err}</div>}
+      <div className="tscroll">
+        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5 }}>
+          <thead><tr style={{ borderTop: "1px solid var(--hairline)", borderBottom: "1px solid var(--hairline-strong)" }}>
+            {cols.map((h, i) => <th key={h} style={{ textAlign: i >= 2 && i !== 3 ? "right" : "left", padding: "7px 14px", font: "600 10px var(--font-ui)", letterSpacing: ".14em", textTransform: "uppercase", color: "var(--text-muted)", whiteSpace: "nowrap" }}>{h}</th>)}
+          </tr></thead>
+          <tbody>{(rows || []).map((r, i) => {
+            const direto = r.vrf === "(direto no T0)";
+            const pct = r.limite_vrf ? r.qtd / r.limite_vrf : 0;
+            const st = stT1(pct * 100);
+            return (
+              <tr key={i} style={{ borderBottom: "1px solid var(--hairline)", background: direto ? "var(--surface-sunken)" : "transparent" }}>
+                <td className="num" style={{ padding: "6px 14px" }}>{r.edge}</td>
+                <td style={{ padding: "6px 14px" }}>{r.node}</td>
+                <td className="num" style={{ padding: "6px 14px", textAlign: "right" }}>{r.limite_node ?? "—"}</td>
+                <td style={{ padding: "6px 14px", color: direto ? "var(--text-muted)" : "var(--ink)" }}>{r.vrf}{r.parent_inferido && <span title="T0 pai inferido pelo nome — o collector gravou t0_parent = '-'" style={{ marginLeft: 6, font: "500 9.5px var(--font-mono)", color: "var(--state-warn)" }}>pai inferido</span>}</td>
+                <td className="num" style={{ padding: "6px 14px", textAlign: "right" }}>{r.limite_vrf ?? "—"}</td>
+                <td className="num" style={{ padding: "6px 14px", textAlign: "right" }}>{r.dia}</td>
+                <td className="num" style={{ padding: "6px 14px", textAlign: "right" }}>{r.mes}</td>
+                <td className="num" style={{ padding: "6px 14px", textAlign: "right" }}>{r.ano}</td>
+                <td className="num" style={{ padding: "6px 14px", textAlign: "right" }}><St st={st} label={String(r.qtd)} /></td>
+                <td className="num" style={{ padding: "6px 14px", textAlign: "right", fontWeight: 600 }}>{r.total_edge != null ? fmt(r.total_edge) : "—"}</td>
+              </tr>);
+          })}</tbody>
+        </table>
+      </div>
+      {rows && rows.length === 0 && <div style={{ padding: 18, color: "var(--text-muted)" }}>sem linhas</div>}
+      <div style={{ padding: "10px 18px 14px", fontSize: 11, color: "var(--text-muted)", fontFamily: "var(--font-mono)" }}>Node = T0 (par de edges; Limite-node 600 aparece só na linha sombreada) · linha sombreada = T1 pendurados direto no T0 (limite 200, como uma VRF) · Dia/Mes/Ano = data do último ponto do collector</div>
+    </Card>
+  );
+}
+
+/* ---- Projeção (modelo da planilha "Capacity 2k29", linhas 1–18) ------------ */
+/* Parte do edge produtivo (TESP7) com o realizado do Influx e projeta mês a mês: */
+/* fase 1 = baseline + MI até o mês de corte; fase 2 = baseline do ano seguinte;   */
+/* capacity = 2.000 + extras (+400 por edge node) e troca de site quando nasce.  */
+const EDGE_PRODUTIVO = "TESP7";
+const PROJ_DEFAULT = {
+  fase1: 139, mi: 16, fase1Ate: "2026-12", fase2: 130, meses: 24, limite: 2000,
+  extras: [{ mes: "2026-10", t1: 400, desc: "TESP07 · EDGE NODE04" }, { mes: "2027-01", t1: 400, desc: "TESP07 · novo par (EDGE NODE05)" }],
+  novoSite: { mes: "2027-06", nome: "TESP07B", capacity: 2400 },
+};
+const LS_PROJ = "citadel_proj_t1";
+const addMes = (ym, k) => { const [y, m] = ym.split("-").map(Number); const d = new Date(Date.UTC(y, m - 1 + k, 1)); return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`; };
+const fmtYM = (ym) => { const [y, m] = ym.split("-"); return `${["jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez"][+m - 1]}/${y.slice(2)}`; };
+function projetarBruno(p, atual, inicioYM) {
+  // séries por site: o edge produtivo congela quando o novo site entra; o novo nasce em 0
+  const series = [{ nome: EDGE_PRODUTIVO, acc: atual, cap: p.limite, ativo: true, pontos: [] }];
+  const linhas = []; let esgotouEm = null;
+  for (let k = 1; k <= p.meses; k++) {
+    const ym = addMes(inicioYM, k);
+    const cresc = ym <= p.fase1Ate ? p.fase1 + p.mi : p.fase2;
+    const eventos = [];
+    if (p.novoSite.nome && ym === p.novoSite.mes) {
+      series.forEach((sr) => { sr.ativo = false; });
+      series.push({ nome: p.novoSite.nome, acc: 0, cap: p.novoSite.capacity, ativo: true, pontos: [] });
+      eventos.push(`${p.novoSite.nome} entra com ${fmt(p.novoSite.capacity)} — ${EDGE_PRODUTIVO} congela`);
+    }
+    const ativo = series[series.length - 1];
+    p.extras.filter((e) => e.mes === ym).forEach((e) => { ativo.cap += +e.t1; eventos.push(`+${e.t1} ${e.desc}`); });
+    ativo.acc += cresc;
+    series.forEach((sr) => { while (sr.pontos.length < k - 1) sr.pontos.push({ ym: null, acc: null, cap: null }); sr.pontos.push({ ym, acc: sr.acc, cap: sr.cap }); });
+    const restante = ativo.cap - ativo.acc;
+    if (restante < 0 && !esgotouEm) esgotouEm = ym;
+    linhas.push({ ym, site: ativo.nome, cresc, acc: ativo.acc, cap: ativo.cap, restante, eventos, total: series.reduce((t, sr) => t + sr.acc, 0) });
+  }
+  return { linhas, esgotouEm, series };
+}
+
+/* Criados por mês no edge produtivo — barras de uma série, mês corrente = parcial. */
+function CriadosPorMes({ linhas, fonte, media }) {
+  const hoje = new Date(); const corrente = `${hoje.getFullYear()}-${String(hoje.getMonth() + 1).padStart(2, "0")}`;
+  const data = linhas.map((l) => ({ k: fmtYM(l.mes), n: l.criados, d: l.removidos || 0, parcial: l.mes === corrente }));
+  return (
+    <div style={{ marginTop: 10 }}>
+      <div style={{ display: "flex", justifyContent: "space-between" }}><Cap>T1 criados por mês · {fonte === "criacao" ? "creation time da Manager" : "eventos do collector"}</Cap><Chip m="OBS" s={`média 3 m = ${media}/mês`} /></div>
+      <div style={{ height: 170, marginTop: 8 }}>
+        <ResponsiveContainer>
+          <BarChart data={data} margin={{ left: 4, right: 8, top: 18, bottom: 0 }}>
+            <CartesianGrid vertical={false} stroke="var(--hairline)" />
+            <XAxis dataKey="k" tick={{ fontSize: 10, fontFamily: "var(--font-mono)" }} stroke="var(--text-faint)" interval={0} angle={data.length > 12 ? -35 : 0} textAnchor={data.length > 12 ? "end" : "middle"} height={data.length > 12 ? 40 : 24} />
+            <YAxis allowDecimals={false} tick={{ fontSize: 10, fontFamily: "var(--font-mono)" }} stroke="var(--text-faint)" width={36} />
+            <Tooltip cursor={{ fill: "var(--selection)" }} contentStyle={{ fontFamily: "var(--font-mono)", fontSize: 11, border: "1px solid var(--hairline)", borderRadius: 6, background: "var(--surface)", color: "var(--ink)" }} formatter={(v, _n, it) => [`${v} criados${it.payload.d ? ` · ${it.payload.d} removidos` : ""}${it.payload.parcial ? " (mês parcial)" : ""}`, ""]} />
+            <Bar dataKey="n" radius={[3, 3, 0, 0]}>
+              {data.map((r, i) => <Cell key={i} fill={r.parcial ? "var(--petrol-200, #A9D3E0)" : "var(--action)"} />)}
+              <LabelList dataKey="n" position="top" style={{ fontFamily: "var(--font-mono)", fontSize: 9.5, fill: "var(--ink)" }} />
+            </Bar>
+          </BarChart>
+        </ResponsiveContainer>
+      </div>
+    </div>
+  );
+}
+
+
+/* Mapa do que está por vir: uma linha por site (o produtivo congela, o novo nasce), capacity tracejada, crosshair. */
+const SERIE_COR = ["var(--action)", "#0E4F6E", "#3C8DAA"];
+function MapaPorVir({ r, esc }) {
+  const [hi, setHi] = useState(null);
+  const ref = React.useRef(null);
+  const W = 640, h = 220, n = r.linhas.length;
+  const x = (i) => 40 + (i * (W - 56)) / Math.max(1, n - 1);
+  const y = (v) => 14 + (h - 44) * (1 - v / esc);
+  const path = (pts, key) => { let d = "", pen = false; pts.forEach((pt, i) => { if (pt[key] == null) { pen = false; return; } d += `${pen ? "L" : "M"}${x(i)},${y(pt[key])}`; pen = true; }); return d; };
+  const onMove = (e) => { const box = ref.current.getBoundingClientRect(); const px = ((e.clientX - box.left) / box.width) * W; const i = Math.round(((px - 40) / (W - 56)) * (n - 1)); setHi(Math.max(0, Math.min(n - 1, i))); };
+  const li = hi != null ? r.linhas[hi] : null;
+  return (
+    <Card>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", flexWrap: "wrap", gap: 8 }}>
+        <Cap>mapa do que está por vir — acumulado por site × capacity</Cap>
+        <span style={{ display: "inline-flex", gap: 12, fontSize: 10.5, fontFamily: "var(--font-mono)", color: "var(--text-muted)" }}>
+          {r.series.map((sr, i) => <span key={sr.nome}><i style={{ display: "inline-block", width: 14, height: 2, background: SERIE_COR[i % SERIE_COR.length], verticalAlign: 3, marginRight: 5 }} />{sr.nome}</span>)}
+          <span><i style={{ display: "inline-block", width: 14, borderTop: "2px dashed var(--cap-limit-op)", verticalAlign: 3, marginRight: 5 }} />capacity</span>
+        </span>
+      </div>
+      <svg ref={ref} viewBox={`0 0 ${W} ${h}`} onMouseMove={onMove} onMouseLeave={() => setHi(null)} style={{ width: "100%", height: "auto", display: "block", marginTop: 8, cursor: "crosshair" }} role="img" aria-label="T1 acumulados por mês, por site, contra a capacity disponível">
+        {[0, .5, 1].map((f) => <g key={f}><line x1={40} x2={W - 16} y1={y(esc * f)} y2={y(esc * f)} stroke="var(--hairline)" strokeDasharray="2 3" /><text x={36} y={y(esc * f) + 3} textAnchor="end" style={{ font: "500 9px var(--font-mono)", fill: "var(--text-faint)" }}>{fmt(Math.round(esc * f))}</text></g>)}
+        {r.linhas.map((l, i) => l.eventos.length ? <g key={"e" + i}><line x1={x(i)} x2={x(i)} y1={12} y2={h - 26} stroke="var(--state-info)" strokeDasharray="3 3" opacity=".7" /><title>{l.eventos.join(" · ")}</title></g> : null)}
+        {r.series.map((sr, i) => <g key={sr.nome}>
+          <path d={path(sr.pontos, "cap")} fill="none" stroke="var(--cap-limit-op)" strokeWidth="1.4" strokeDasharray="5 4" opacity={i === r.series.length - 1 ? 1 : .55} />
+          <path d={path(sr.pontos, "acc")} fill="none" stroke={SERIE_COR[i % SERIE_COR.length]} strokeWidth="2" />
+        </g>)}
+        {r.esgotouEm && (() => { const i = r.linhas.findIndex((l) => l.ym === r.esgotouEm); const si = r.series.findIndex((sr) => sr.nome === r.linhas[i].site); return <g><circle cx={x(i)} cy={y(r.linhas[i].acc)} r={5} fill="var(--state-crit)" stroke="var(--surface)" strokeWidth="1.5" /><text x={x(i)} y={y(r.linhas[i].acc) - 9} textAnchor="middle" style={{ font: "600 9.5px var(--font-mono)", fill: "var(--state-crit)" }}>{r.linhas[i].site} esgota {fmtYM(r.esgotouEm)}</text></g>; })()}
+        {r.linhas.map((l, i) => (i % 3 === 0 || i === n - 1) ? <text key={"t" + i} x={x(i)} y={h - 8} textAnchor="middle" style={{ font: "500 9px var(--font-mono)", fill: "var(--text-faint)" }}>{fmtYM(l.ym)}</text> : null)}
+        {hi != null && <g>
+          <line x1={x(hi)} x2={x(hi)} y1={10} y2={h - 26} stroke="var(--ink)" opacity=".5" />
+          {r.series.map((sr, i) => sr.pontos[hi].acc != null && <circle key={sr.nome} cx={x(hi)} cy={y(sr.pontos[hi].acc)} r={4} fill={SERIE_COR[i % SERIE_COR.length]} stroke="var(--surface)" strokeWidth="1.5" />)}
+        </g>}
+      </svg>
+      <div style={{ marginTop: 6, minHeight: 18, fontSize: 11, fontFamily: "var(--font-mono)", color: "var(--ink)" }}>
+        {li ? <><b>{fmtYM(li.ym)}</b>{r.series.map((sr, i) => sr.pontos[hi].acc != null && <span key={sr.nome} style={{ marginLeft: 12 }}><span style={{ color: SERIE_COR[i % SERIE_COR.length] }}>■</span> {sr.nome} {fmt(sr.pontos[hi].acc)} / {fmt(sr.pontos[hi].cap)} <span style={{ color: sr.pontos[hi].cap - sr.pontos[hi].acc < 0 ? "var(--state-crit)" : "var(--text-muted)" }}>({sr.pontos[hi].cap - sr.pontos[hi].acc >= 0 ? "+" : ""}{fmt(sr.pontos[hi].cap - sr.pontos[hi].acc)})</span></span>)}<span style={{ marginLeft: 12, color: "var(--text-muted)" }}>total {fmt(li.total)}</span>{li.eventos.length > 0 && <span style={{ marginLeft: 12, color: "var(--state-info)" }}>{li.eventos.join(" · ")}</span>}</> : <span style={{ color: "var(--text-faint)" }}>passe o mouse para ler mês a mês · parâmetros acima recalculam ao vivo</span>}
+      </div>
+    </Card>
+  );
+}
+
+function ProjecaoT1({ sites }) {
+  const [p, setP] = useState(() => { try { return { ...PROJ_DEFAULT, ...JSON.parse(localStorage.getItem(LS_PROJ) || "{}") }; } catch { return PROJ_DEFAULT; } });
+  const [rodou, setRodou] = useState(null);
+  const [obs, setObs] = useState(null); // crescimento observado no Influx (OBS)
+  const prod = sites.find((s) => s.site === EDGE_PRODUTIVO);
+  const atual = prod?.total ?? 0;
+  React.useEffect(() => {
+    api(`/nsx/t1/crescimento?site=${EDGE_PRODUTIVO}`).then((c) => {
+      setObs({ fonte: "criacao", porMes: Math.round(c.media_criados_3m || 0), mesesMedia: c.meses_fechados_na_media, snapshot: c.snapshot, snapshots: c.snapshots, primeiro: c.primeiro_t1, total: c.total_t1, sumiram: c.sumiram_desde_snapshot_anterior, porMesLista: c.por_mes });
+    }).catch(() => {
+      // sem snapshot de criação: delta do Influx (retenção curta)
+      Promise.all([api(`/nsx/t1/historico?site=${EDGE_PRODUTIVO}&dias=120`), api(`/nsx/t1/eventos?site=${EDGE_PRODUTIVO}&dias=120`)]).then(([h, ev]) => {
+        const pts = h.filter((x) => x.total != null);
+        if (pts.length < 2) return;
+        const d0 = new Date(pts[0].quando), d1 = new Date(pts[pts.length - 1].quando), dias = Math.max(1, (d1 - d0) / 864e5);
+        const meses = {};
+        ev.forEach((e) => { const k = e.quando.slice(0, 7); meses[k] = meses[k] || { criados: 0, removidos: 0 }; meses[k][e.event === "created" ? "criados" : "removidos"]++; });
+        setObs({ fonte: "influx", porMes: Math.round(((pts[pts.length - 1].total - pts[0].total) / dias) * 30.4), dias: Math.round(dias), de: pts[0].quando.slice(0, 10), t0: pts[0].total, t1: pts[pts.length - 1].total, porMesLista: Object.keys(meses).sort().map((k) => ({ mes: k, ...meses[k] })) });
+      }).catch(() => setObs(null));
+    });
+  }, []);
+  const hoje = new Date(); const inicioYM = `${hoje.getFullYear()}-${String(hoje.getMonth() + 1).padStart(2, "0")}`;
+  const set = (k, v) => setP((o) => ({ ...o, [k]: v }));
+  const setExtra = (i, k, v) => setP((o) => ({ ...o, extras: o.extras.map((e, j) => j === i ? { ...e, [k]: v } : e) }));
+  const rodar = () => { const r = projetarBruno(p, atual, inicioYM); setRodou(r); try { localStorage.setItem(LS_PROJ, JSON.stringify(p)); } catch { /* sem storage */ } };
+  React.useEffect(() => { if (rodou) setRodou(projetarBruno(p, atual, inicioYM)); }, [p, atual]); // dinâmico após a 1ª execução
+  const In = ({ k, w = 70, type = "number" }) => <input type={type} value={p[k]} onChange={(e) => set(k, type === "number" ? +e.target.value : e.target.value)} style={{ width: w, font: "500 12px var(--font-mono)", padding: "3px 6px", border: "1px solid var(--hairline)", borderRadius: 4, background: "var(--surface)", color: "var(--ink)" }} />;
+  const r = rodou;
+  const esc = r ? Math.max(...r.series.flatMap((sr) => sr.pontos.flatMap((pt) => [pt.acc || 0, pt.cap || 0]))) * 1.05 : 1;
   return (
     <div style={{ display: "grid", gap: 14 }}>
-      <div style={{ background: "var(--state-crit-bg)", border: "1px solid var(--state-crit)", borderRadius: "var(--radius)", padding: "11px 15px", display: "flex", alignItems: "center", gap: 13, flexWrap: "wrap" }}>
-        <span style={{ fontFamily: "var(--font-mono)", color: "var(--state-crit)", fontSize: 15 }}>▲</span>
-        <div style={{ flex: 1, minWidth: 200 }}>
-          <div style={{ fontSize: 13.5, fontWeight: 600 }}>NSX T1 pode atingir o limite operacional em 38 dias.</div>
-          <div style={{ fontSize: 11.5, color: "var(--text-muted)", marginTop: 2 }}>TESP07 · 184 de 190 T1 · projeção 12 m, confiança 84 %</div>
+      <Card>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", flexWrap: "wrap", gap: 8 }}>
+          <Cap>projeção — parte do edge produtivo ({EDGE_PRODUTIVO})</Cap>
+          <span style={{ display: "inline-flex", gap: 6 }}><Chip m="OBS" s={`${EDGE_PRODUTIVO} hoje = ${fmt(atual)} T1`} /><Chip m="MAN" s="premissas da planilha Capacity 2k29" /></span>
         </div>
-        <Chip m="EST" s="mock — aguardando nsx_collector" />
+        {obs && obs.fonte === "criacao" && <div style={{ marginTop: 8, fontSize: 11.5, color: "var(--text-muted)", fontFamily: "var(--font-mono)" }}>
+          {EDGE_PRODUTIVO}: {fmt(obs.total)} T1 · primeiro T1 em {obs.primeiro?.slice(0, 10)} · snapshot {obs.snapshot?.slice(0, 16).replace("T", " ")} ({obs.snapshots} snapshot{obs.snapshots > 1 ? "s" : ""}{obs.sumiram ? ` · ${obs.sumiram} sumiram desde o anterior` : ""}) · atualizar: <code>scripts/nsx_t1capacity.py --site {EDGE_PRODUTIVO} --criacao</code>
+        </div>}
+        {obs && obs.fonte === "influx" && <div style={{ marginTop: 8, fontSize: 11.5, color: "var(--state-warn)", fontFamily: "var(--font-mono)" }}>
+          sem snapshot de criação — usando o Influx (histórico desde {obs.de}). Rode <code>scripts/nsx_t1capacity.py --site {EDGE_PRODUTIVO} --criacao</code> para o histórico completo.
+        </div>}
+        {obs && obs.porMesLista?.length > 0 && <CriadosPorMes linhas={obs.porMesLista} fonte={obs.fonte} media={obs.porMes} />}
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))", gap: "10px 18px", marginTop: 12, fontSize: 12 }}>
+          <label>crescimento/mês (baseline dez–mai) <In k="fase1" />
+            {obs && <div style={{ marginTop: 4, display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+              <Chip m="OBS" s={obs.fonte === "criacao" ? `observado ${obs.porMes}/mês · média ${obs.mesesMedia.map(fmtYM).join(", ")} · creation time NSX` : `observado ${obs.porMes}/mês · ${fmt(obs.t0)}→${fmt(obs.t1)} em ${obs.dias} d (Influx)`} />
+              <Btn sec onClick={() => setP((o) => ({ ...o, fase1: obs.porMes, mi: 0 }))} style={{ padding: "3px 8px", fontSize: 11 }}>usar observado</Btn>
+            </div>}
+          </label>
+          <label>MI/mês (clientes até fim de 2026) <In k="mi" /></label>
+          <label>fase 1 vale até <In k="fase1Ate" type="month" w={130} /></label>
+          <label>crescimento/mês depois (baseline 2k27) <In k="fase2" /></label>
+          <label>limite por datacenter <In k="limite" /></label>
+          <label>horizonte (meses) <In k="meses" /></label>
+        </div>
+        <div style={{ marginTop: 12, display: "grid", gap: 6, fontSize: 12 }}>
+          <Cap>T1 extras por edge (capacity que entra)</Cap>
+          {p.extras.map((e, i) => (
+            <div key={i} style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+              <input type="month" value={e.mes} onChange={(ev) => setExtra(i, "mes", ev.target.value)} style={{ font: "500 12px var(--font-mono)", padding: "3px 6px", border: "1px solid var(--hairline)", borderRadius: 4, background: "var(--surface)", color: "var(--ink)" }} />
+              <input type="number" value={e.t1} onChange={(ev) => setExtra(i, "t1", +ev.target.value)} style={{ width: 70, font: "500 12px var(--font-mono)", padding: "3px 6px", border: "1px solid var(--hairline)", borderRadius: 4, background: "var(--surface)", color: "var(--ink)" }} />
+              <input value={e.desc} onChange={(ev) => setExtra(i, "desc", ev.target.value)} style={{ flex: 1, minWidth: 180, font: "500 12px var(--font-ui)", padding: "3px 6px", border: "1px solid var(--hairline)", borderRadius: 4, background: "var(--surface)", color: "var(--ink)" }} />
+              <Btn sec onClick={() => setP((o) => ({ ...o, extras: o.extras.filter((_, j) => j !== i) }))}>×</Btn>
+            </div>
+          ))}
+          <div><Btn sec onClick={() => setP((o) => ({ ...o, extras: [...o.extras, { mes: addMes(inicioYM, 3), t1: 400, desc: "" }] }))}>+ edge extra</Btn></div>
+          <Cap style={{ marginTop: 6 }}>novo site (zera a contagem)</Cap>
+          <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+            <input type="month" value={p.novoSite.mes} onChange={(ev) => set("novoSite", { ...p.novoSite, mes: ev.target.value })} style={{ font: "500 12px var(--font-mono)", padding: "3px 6px", border: "1px solid var(--hairline)", borderRadius: 4, background: "var(--surface)", color: "var(--ink)" }} />
+            <input value={p.novoSite.nome} onChange={(ev) => set("novoSite", { ...p.novoSite, nome: ev.target.value })} placeholder="nome (vazio = sem novo site)" style={{ width: 140, font: "500 12px var(--font-mono)", padding: "3px 6px", border: "1px solid var(--hairline)", borderRadius: 4, background: "var(--surface)", color: "var(--ink)" }} />
+            <input type="number" value={p.novoSite.capacity} onChange={(ev) => set("novoSite", { ...p.novoSite, capacity: +ev.target.value })} style={{ width: 80, font: "500 12px var(--font-mono)", padding: "3px 6px", border: "1px solid var(--hairline)", borderRadius: 4, background: "var(--surface)", color: "var(--ink)" }} />
+            <span style={{ color: "var(--text-muted)" }}>T1 de capacity</span>
+          </div>
+        </div>
+        <div style={{ marginTop: 14, display: "flex", gap: 10, alignItems: "center" }}>
+          <Btn onClick={rodar} disabled={!prod}>▶ gerar previsão</Btn>
+          <Btn sec onClick={() => { setP(PROJ_DEFAULT); setRodou(null); try { localStorage.removeItem(LS_PROJ); } catch { /* */ } }}>restaurar planilha</Btn>
+          {!prod && <span style={{ fontSize: 12, color: "var(--state-crit)" }}>sem dado do {EDGE_PRODUTIVO} no Influx</span>}
+        </div>
+      </Card>
+      {r && (
+        <>
+          <div style={{ background: r.esgotouEm ? "var(--state-warn-bg)" : "var(--state-ok-bg)", border: `1px solid ${r.esgotouEm ? "var(--state-warn)" : "var(--state-ok)"}`, borderRadius: "var(--radius)", padding: "11px 15px", fontSize: 13 }}>
+            {r.esgotouEm ? <><b>Capacity do {r.linhas.find((l) => l.ym === r.esgotouEm)?.site} esgota em {fmtYM(r.esgotouEm)}</b> com as premissas atuais.</> : <><b>Não esgota</b> no horizonte de {p.meses} meses.</>}
+            {" "}<span style={{ color: "var(--text-muted)" }}>Última linha: {fmt(r.linhas[r.linhas.length - 1].acc)} T1 em {r.linhas[r.linhas.length - 1].site}, restante {fmt(r.linhas[r.linhas.length - 1].restante)}.</span>
+          </div>
+          <MapaPorVir r={r} esc={esc} />
+          <Card style={{ padding: 0, overflow: "hidden" }}>
+            <div style={{ padding: "15px 18px 10px" }}><Cap>mês a mês (mesmas linhas da planilha: acumulado · MoM · capacity normal · evento)</Cap></div>
+            <div className="tscroll">
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5 }}>
+                <thead><tr style={{ borderTop: "1px solid var(--hairline)", borderBottom: "1px solid var(--hairline-strong)" }}>
+                  {["mês", "site ativo", "cresc. MoM", "acumulado", "capacity", "restante", "total parque", "evento"].map((h, i) => <th key={h} style={{ textAlign: i >= 2 && i <= 6 ? "right" : "left", padding: "7px 14px", font: "600 10px var(--font-ui)", letterSpacing: ".14em", textTransform: "uppercase", color: "var(--text-muted)", whiteSpace: "nowrap" }}>{h}</th>)}
+                </tr></thead>
+                <tbody>{r.linhas.map((l) => { const st = l.restante < 0 ? "crit" : l.restante < l.cap * 0.15 ? "warn" : "ok"; return (
+                  <tr key={l.ym} style={{ borderBottom: "1px solid var(--hairline)", background: l.eventos.length ? "var(--surface-sunken)" : "transparent" }}>
+                    <td className="num" style={{ padding: "6px 14px" }}>{fmtYM(l.ym)}</td>
+                    <td style={{ padding: "6px 14px" }}>{l.site}</td>
+                    <td className="num" style={{ padding: "6px 14px", textAlign: "right" }}>+{l.cresc}</td>
+                    <td className="num" style={{ padding: "6px 14px", textAlign: "right" }}>{fmt(l.acc)}</td>
+                    <td className="num" style={{ padding: "6px 14px", textAlign: "right", color: "var(--cap-limit-op)" }}>{fmt(l.cap)}</td>
+                    <td className="num" style={{ padding: "6px 14px", textAlign: "right" }}><St st={st} label={fmt(l.restante)} /></td>
+                    <td className="num" style={{ padding: "6px 14px", textAlign: "right", color: "var(--text-muted)" }}>{fmt(l.total)}</td>
+                    <td style={{ padding: "6px 14px", fontSize: 11.5, color: "var(--text-muted)" }}>{l.eventos.join(" · ")}</td>
+                  </tr>); })}</tbody>
+              </table>
+            </div>
+          </Card>
+        </>
+      )}
+    </div>
+  );
+}
+
+function TresOlhos() {
+  const [site, setSite] = useState("");
+  const [aba, setAba] = useState("painel");
+  const nsx = useNsxT1(site);
+  const n = nsx.data;
+  const Aba = ({ id, children }) => <button onClick={() => setAba(id)} aria-pressed={aba === id} style={{ font: "600 11.5px var(--font-ui)", padding: "6px 14px", borderRadius: 4, cursor: "pointer", border: "1px solid " + (aba === id ? "var(--action)" : "var(--hairline)"), background: aba === id ? "var(--selection)" : "var(--surface)", color: aba === id ? "var(--action)" : "var(--text-muted)" }}>{children}</button>;
+  const r = n || { id: "nsxt1", name: "NSX T1 Gateways", hist: [], proj: [], op: NSX_T1_OP_LIMIT, tech: null, days: null, conf: "—" };
+  const alerta = n && n.days != null && n.days <= 180;
+  return (
+    <div style={{ display: "grid", gap: 14 }}>
+      <div style={{ display: "flex", gap: 6 }}><Aba id="painel">painel</Aba><Aba id="tabela">tabela</Aba><Aba id="projecao">▶ previsão</Aba></div>
+      {aba === "tabela" && n && <TabelaT1 site={n.site} />}
+      {aba === "projecao" && <ProjecaoT1 sites={nsx.sites} />}
+      {aba === "painel" && <>
+      <div style={{ background: alerta ? "var(--state-crit-bg)" : "var(--surface)", border: `1px solid ${alerta ? "var(--state-crit)" : "var(--hairline)"}`, borderRadius: "var(--radius)", padding: "11px 15px", display: "flex", alignItems: "center", gap: 13, flexWrap: "wrap" }}>
+        <span style={{ fontFamily: "var(--font-mono)", color: alerta ? "var(--state-crit)" : "var(--text-muted)", fontSize: 15 }}>{alerta ? "▲" : "●"}</span>
+        <div style={{ flex: 1, minWidth: 200 }}>
+          {nsx.err ? <div style={{ fontSize: 13.5, fontWeight: 600, color: "var(--state-crit)" }}>NSX T1: {nsx.err}</div>
+            : !n ? <div style={{ fontSize: 13.5, fontWeight: 600 }}>{nsx.busy ? "carregando capacity de T1…" : "◌ sem coleta de T1"}</div>
+            : <>
+              <div style={{ fontSize: 13.5, fontWeight: 600 }}>{n.days != null ? `NSX T1 pode atingir o limite operacional em ${n.days} dias.` : "NSX T1 sem tendência de esgotamento no horizonte projetado."}</div>
+              <div style={{ fontSize: 11.5, color: "var(--text-muted)", marginTop: 2 }}>{n.site} · {fmt(n.usage)} de {fmt(n.op)} T1 (limite 2k/DC) · projeção 90 d, confiança {n.conf}</div>
+            </>}
+        </div>
+        {nsx.sites.length > 1 && (
+          <select value={n ? n.site : site} onChange={(e) => setSite(e.target.value)} style={{ font: "500 12px var(--font-mono)", padding: "4px 8px", border: "1px solid var(--hairline)", borderRadius: 4, background: "var(--surface)", color: "var(--ink)" }}>
+            {nsx.sites.map((x) => <option key={x.site} value={x.site}>{x.site} · {fmt(x.total ?? 0)}</option>)}
+          </select>
+        )}
+        <Chip m="OBS" s="nsx-collector → InfluxDB" />
       </div>
-      <Card mock>
+      {n && <MapaSite site={n.site} t0={n.t0} vrf={n.vrf} />}
+      {nsx.sites.length > 0 && <MedidorParque sites={nsx.sites} sel={n ? n.site : ""} onSel={setSite} />}
+      {n && <TrajetoriaEventos site={n.site} hist={n.hist} datas={n.datas} proj={n.proj} op={n.op} eventos={n.eventos} days={n.days} conf={n.conf} />}
+      <details style={{ marginTop: 4 }}>
+        <summary style={{ cursor: "pointer", font: "600 10.5px var(--font-ui)", letterSpacing: ".14em", textTransform: "uppercase", color: "var(--text-muted)" }}>versão anterior (trajetória simples + barras)</summary>
+        <div style={{ display: "grid", gap: 14, marginTop: 10 }}>
+      <Card mock={!n}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 8 }}>
           <span style={{ font: "600 14px var(--font-ui)", color: "var(--petrol-900)" }}>{r.name}</span>
-          {r.days && <span className="num" style={{ font: "700 14px var(--font-mono)", color: "var(--cap-limit-op)" }}>{r.days} dias · {r.conf}</span>}
+          {r.days != null && <span className="num" style={{ font: "700 14px var(--font-mono)", color: "var(--cap-limit-op)" }}>{r.days} dias · {r.conf}</span>}
         </div>
         <Trajectory hist={r.hist} proj={r.proj} op={r.op} tech={r.tech} h={170} />
+        {n && <div style={{ marginTop: 6, display: "flex", gap: 8, flexWrap: "wrap" }}><Chip m="OBS" s="histórico diário · nsx_t1_totals" /><Chip m="CALC" s="projeção linear 90 d" /><Chip m="MAN" s="limite op = 2.000 T1 por datacenter" /></div>}
       </Card>
-      <Card mock>
-        <Cap style={{ marginBottom: 10 }}>runways por recurso</Cap>
-        <div style={{ display: "grid", gap: 4 }}>
-          {CAPACITY.map((x) => <Runway key={x.id} {...x} name={x.name} sel={sel === x.id} onClick={() => setSel(x.id)} />)}
+      {n && (
+        <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) minmax(0,1fr)", gap: 14 }}>
+          <T1Bars rows={n.t0} nameKey="t0_name" title={`T1 por T0 (par de edges · direto + VRFs · limite 600) · ${n.site}`} />
+          <T1Bars rows={n.vrf} nameKey="vrf_name" title={`T1 por VRF · ${n.site}`} />
         </div>
-      </Card>
+      )}
+        </div>
+      </details>
+      </>}
     </div>
   );
 }
@@ -631,10 +1157,16 @@ function Corvo() {
 }
 
 function Muralha() {
+  const [nsx, setNsx] = useState([]);
+  const [err, setErr] = useState("");
+  React.useEffect(() => { api("/nsx/t1/resumo").then(setNsx).catch((e) => setErr(String(e.message || e))); }, []);
+  const linhasNsx = nsx.map((r) => ({ plat: "NSX-T", res: "Tier-1 Routers", edge: r.site, use: r.total ?? r.nsx_current ?? 0, op: NSX_T1_OP_LIMIT, vendor: null, src: "premissa arquitetura · 2k/DC" }));
+  const linhas = [...linhasNsx, ...LIMITS];
   return (
     <Card mock style={{ padding: 0, overflow: "hidden" }}>
-      <div style={{ display: "flex", justifyContent: "space-between", padding: "15px 18px 10px" }}>
-        <Cap>limites de plataforma — uso × operacional × fabricante</Cap><Chip m="EST" s="mock — aguardando coletores" />
+      <div style={{ display: "flex", justifyContent: "space-between", padding: "15px 18px 10px", gap: 8, flexWrap: "wrap" }}>
+        <Cap>limites de plataforma — uso × operacional × fabricante</Cap>
+        <span style={{ display: "inline-flex", gap: 6 }}><Chip m="OBS" s={err ? `NSX T1 indisponível: ${err}` : `NSX T1 · ${nsx.length} sites`} /><Chip m="EST" s="demais — mock" /></span>
       </div>
       <div className="tscroll">
       <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5 }}>
@@ -643,7 +1175,7 @@ function Muralha() {
             <th key={i} style={{ textAlign: i >= 3 && i <= 6 ? "right" : "left", padding: "7px 14px", font: "600 10px var(--font-ui)", letterSpacing: ".14em", textTransform: "uppercase", color: "var(--text-muted)", whiteSpace: "nowrap" }}>{h}</th>
           ))}
         </tr></thead>
-        <tbody>{LIMITS.map((l, i) => {
+        <tbody>{linhas.map((l, i) => {
           const slack = Math.round(100 * (1 - l.use / l.op));
           const st = slack < 10 ? "crit" : slack < 35 ? "warn" : "ok";
           return (
@@ -653,7 +1185,7 @@ function Muralha() {
               <td className="num" style={{ padding: "8px 14px" }}>{l.edge}</td>
               <td className="num" style={{ padding: "8px 14px", textAlign: "right" }}>{fmt(l.use)}</td>
               <td className="num" style={{ padding: "8px 14px", textAlign: "right", color: "var(--cap-limit-op)" }}>{fmt(l.op)}</td>
-              <td className="num" style={{ padding: "8px 14px", textAlign: "right" }}>{fmt(l.vendor)}</td>
+              <td className="num" style={{ padding: "8px 14px", textAlign: "right" }}>{l.vendor != null ? fmt(l.vendor) : "—"}</td>
               <td className="num" style={{ padding: "8px 14px", textAlign: "right" }}><St st={st} label={slack + " %"} /></td>
               <td style={{ padding: "8px 14px", fontSize: 11.5, color: "var(--text-muted)" }}>{l.src}</td>
             </tr>

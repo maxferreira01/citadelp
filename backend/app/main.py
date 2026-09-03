@@ -7,6 +7,7 @@ from app.aci.router import router as aci_router
 from app.auth.router import router as auth_router
 from app.checkmk.router import router as checkmk_router
 from app.corvo.router import router as corvo_router
+from app.nsx.router import router as nsx_router
 
 app = FastAPI(
     title="CITADEL API",
@@ -24,6 +25,7 @@ app.include_router(auth_router)
 app.include_router(corvo_router)
 app.include_router(checkmk_router)
 app.include_router(aci_router)
+app.include_router(nsx_router)
 
 
 @app.get("/healthz", tags=["infra"])
