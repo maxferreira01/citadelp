@@ -76,7 +76,12 @@ export default function CriadosPorPeriodo({ site, media, fonte, porMesSnapshot }
   const totalR = dados.reduce((a, d) => a + d.removidos, 0);
   const rotulaBarra = dados.length <= 14;
   const muitos = dados.length > 12;
-  const origem = tudo ? "snapshot de criação · histórico completo" : `eventos do collector · ${dias} d`;
+  /* Cobertura real: o Influx guarda menos do que a janela pedida (retenção).
+     Dizer "365 d" quando só há 83 sugere um ano que não existe. */
+  const primeiro = useMemo(() => (eventos?.length ? eventos.reduce((m, e) => (e.quando < m ? e.quando : m), eventos[0].quando).slice(0, 10) : null), [eventos]);
+  const cobertura = primeiro ? Math.round((Date.now() - Date.parse(primeiro + "T00:00:00Z")) / 864e5) : null;
+  const truncado = !tudo && cobertura != null && cobertura < dias - 2;
+  const dataBR = (iso) => `${iso.slice(8, 10)}/${iso.slice(5, 7)}`;
 
   return (
     <div style={{ marginTop: 10 }}>
@@ -92,7 +97,9 @@ export default function CriadosPorPeriodo({ site, media, fonte, porMesSnapshot }
           {gran === "mes" && porMesSnapshot?.length > 0 && (
             <ToggleChip on={tudo} onClick={() => setTudo(true)}>tudo</ToggleChip>
           )}
-          <ProvenanceChip method="OBS" source={origem} />
+          {tudo
+            ? <ProvenanceChip method="OBS" source="snapshot de criação · histórico completo" />
+            : <ProvenanceChip method="OBS" source="eventos do collector" age={primeiro ? `desde ${dataBR(primeiro)}` : `${dias} d`} stale={truncado} />}
         </span>
       </div>
 
@@ -136,7 +143,8 @@ export default function CriadosPorPeriodo({ site, media, fonte, porMesSnapshot }
             <span><i style={{ background: "var(--cap-consumed)" }} />criados</span>
             {temRemocao && <span><i style={{ background: "var(--petrol-300)" }} />removidos</span>}
             <span>barra clara = período incompleto</span>
-            {!tudo && <span style={{ marginLeft: "auto" }}>janela limitada pela retenção do Influx</span>}
+            {truncado && <span style={{ marginLeft: "auto" }}>o Influx guarda {cobertura} d — a janela de {dias} d não acrescenta nada</span>}
+            {!tudo && !truncado && <span style={{ marginLeft: "auto" }}>janela limitada pela retenção do Influx</span>}
           </div>
         </>
       )}
