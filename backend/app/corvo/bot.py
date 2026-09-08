@@ -13,9 +13,31 @@ from datetime import datetime
 from pathlib import Path
 from typing import Protocol
 
-from app.corvo.datadog import strip_accents
+from app.corvo.datadog import normalize_dc, strip_accents
 from app.corvo.datadog_metrics import fmt_duration
 from app.corvo.datadog_query import PERIOD_KINDS, QueryEngine, period
+
+# Datacenters com botão próprio (ordem fixa = ordem dos botões). Chave normalizada
+# como no store (TESP03); o rótulo do botão é a forma curta (TESP3, TECE1).
+DC_BUTTONS = (
+    "TESP02",
+    "TESP03",
+    "TESP04",
+    "TESP05",
+    "TESP06",
+    "TESP07",
+    "TECE01",
+    "TBSP01",
+    "TBSP02",
+    "TBSP03",
+    "TBCE01",
+)
+# Token de DC solto no texto ("tesp3", "TESP03", "tece1"): só as famílias reais de site,
+# e não casa dentro de hostname (leaf1001tesp03, tesp3cmk1p00004) porque exige borda dos
+# dois lados.
+_DC_TOKEN_RE = re.compile(r"(?<![\w-])(t(?:esp|ece|bsp|bce|psp)\d{1,2})(?![\w-])")
+# action_id dos botões que o bot_app despacha: corvo_cmd_N (comandos) e corvo_dc_N (DCs).
+BUTTON_ACTION_RE = re.compile(r"^corvo_(cmd|dc)_\d+$")
 
 PERIOD_ALIASES = {
     "hoje": "hoje",
@@ -100,10 +122,29 @@ def _extract_period(t: str) -> tuple[str | None, str]:
     return None, t
 
 
+def _extract_dc(t: str) -> tuple[str | None, str]:
+    """Acha um datacenter no texto; devolve (DC normalizado, texto sem o DC)."""
+    m = _DC_TOKEN_RE.search(t)
+    if not m:
+        return None, t
+    dc = normalize_dc(m.group(1))
+    return dc, (t[: m.start()] + " " + t[m.end() :]).strip()
+
+
+def dc_label(dc: str) -> str:
+    """TESP03 → TESP3, TECE01 → TECE1 (forma curta usada nos botões e no comando)."""
+    m = re.fullmatch(r"([A-Z]{4})0*(\d+)", dc or "")
+    return f"{m.group(1)}{m.group(2)}" if m else (dc or "?")
+
+
 def route(text: str) -> Command:
     t = normalize(text)
     if not t:
         return Command("ajuda", raw=text)
+    dc, rest = _extract_dc(t)
+    if dc:
+        kind, _ = _extract_period(rest)
+        return Command("dc", arg=dc, period=kind, raw=text)
     for name, rx in COMMANDS:
         m = rx.search(t)
         if not m:
@@ -138,19 +179,37 @@ def _context(md: str) -> dict:
     return {"type": "context", "elements": [{"type": "mrkdwn", "text": md[:2900]}]}
 
 
-def _buttons(labels: list[tuple[str, str]]) -> dict:
+def _buttons(labels: list[tuple[str, str]], prefix: str = "corvo_cmd") -> dict:
     return {
         "type": "actions",
         "elements": [
             {
                 "type": "button",
                 "text": {"type": "plain_text", "text": lbl, "emoji": True},
-                "action_id": f"corvo_cmd_{i}",
+                "action_id": f"{prefix}_{i}",
                 "value": val,
             }
             for i, (lbl, val) in enumerate(labels)
         ],
     }
+
+
+_PERIOD_TEXT = {"mes": "mes", "mes_anterior": "mes anterior"}
+
+
+def dc_buttons(counts: dict[str, int] | None = None, kind: str | None = None) -> dict:
+    """Uma linha com um botão por datacenter. ``counts`` (by_dc do resumo) entra no
+    rótulo ("TESP3 (5)") e acrescenta DCs fora da lista fixa; ``kind`` faz o botão
+    consultar o mesmo período da mensagem em que ele aparece ("tesp3 ontem")."""
+    counts = {k: v for k, v in (counts or {}).items() if k and k != "?"}
+    dcs = list(DC_BUTTONS) + sorted(k for k in counts if k not in DC_BUTTONS)
+    suffix = f" {_PERIOD_TEXT.get(kind, kind)}" if kind else ""
+    labels = []
+    for dc in dcs:
+        short = dc_label(dc)
+        n = counts.get(dc)
+        labels.append((f"{short} ({n})" if n else short, f"{short.lower()}{suffix}"))
+    return _buttons(labels, prefix="corvo_dc")
 
 
 def _user(uid: str | None, name: str | None) -> str:
@@ -178,6 +237,7 @@ HELP = (
     "• `recorrentes [período]` — alertas repetidos\n"
     "• `sem resposta [período]` — pages sem ninguém\n"
     "• `alerta 52488` / `alerta INC13450` — detalhe de uma page\n"
+    "• `tesp3` · `tece1 7d` · `tbsp2 mês` — pages de um datacenter (ou use os botões)\n"
     "• `reenviar pdf` — último relatório em PDF\n"
     "_Período padrão: 30d nas consultas; o relatório diário cobre 08:00→08:00._"
 )
@@ -198,8 +258,10 @@ def handle(cmd: Command, ctx: BotContext, now: datetime) -> Reply:
                     ("Tempo médio", "tempo medio"),
                 ]
             ),
+            _context("*Por datacenter* (últimos 30 dias):"),
+            dc_buttons(),
         ]
-        text = "Comandos: hoje, ontem, 7d, 30d, plantão, mês, tempo médio, top dc, recorrentes, sem resposta, alerta <id>, reenviar pdf"  # noqa: E501
+        text = "Comandos: hoje, ontem, 7d, 30d, plantão, mês, tempo médio, top dc, recorrentes, sem resposta, alerta <id>, <dc> [período], reenviar pdf"  # noqa: E501
         if cmd.arg:
             blocks.insert(0, _context(f"Não entendi `{cmd.arg[:60]}`. Veja os comandos:"))
         return Reply(blocks, text)
@@ -225,6 +287,13 @@ def handle(cmd: Command, ctx: BotContext, now: datetime) -> Reply:
         blocks, text = summary_blocks(sm, kind)
         pdf = ctx.render_pdf_for(kind, now) if sm["total"] else None
         return Reply(blocks, text, file=pdf, file_title=pdf.name if pdf else None)
+
+    if name == "dc":
+        kind = cmd.period or "30d"
+        s, e, label = period(kind, now)
+        sm = q.dc_summary(cmd.arg or "", s, e, label)
+        blocks, text = dc_blocks(sm, kind)
+        return Reply(blocks, text)
 
     if name == "plantao":
         oc = q.oncall()
@@ -514,12 +583,94 @@ def summary_blocks(sm: dict, kind: str = "ontem") -> tuple[list[dict], str]:
             ]
         )
     )
+    blocks.append(dc_buttons(sm["by_dc"], kind))
     blocks.append(
         _context(
             "fonte: #datadog-redes (Slack) · ack exato só com o bot ouvindo o canal; antes disso o ack é "  # noqa: E501
-            "aproximado pela 1ª resposta humana · PDF completo na thread"
+            "aproximado pela 1ª resposta humana · PDF completo na thread · botões por DC = mesmo período"  # noqa: E501
         )
     )
+    text = f"{title} — {total} pages, {n_un} sem resposta, resposta mediana {fmt_duration(r['median'])}"  # noqa: E501
+    return blocks, text
+
+
+def dc_blocks(sm: dict, kind: str = "30d") -> tuple[list[dict], str]:
+    """Resumo Block Kit de um datacenter (comando ``tesp3 [período]`` e botões por DC)."""
+    dc = sm["dc"]
+    short = dc_label(dc)
+    w = sm["window"]
+    total = sm["total"]
+    bk, st = sm["by_kind"], sm["by_status"]
+    r, a = sm["response"], sm["ack_all"]
+    n_un = len(sm["unanswered"])
+    title = f"Corvo · {short} — {w['label']}"
+    ptxt = _PERIOD_TEXT.get(kind, kind)
+    nav = _buttons(
+        [
+            ("Hoje", f"{short.lower()} hoje"),
+            ("Ontem", f"{short.lower()} ontem"),
+            ("7d", f"{short.lower()} 7d"),
+            ("30d", f"{short.lower()} 30d"),
+            ("Top DC", f"top dc {ptxt}"),
+        ]
+    )
+    blocks: list[dict] = [_header(title)]
+    if not total:
+        blocks.append(_section(f"*Pages de {short} no período:* nenhuma 🎉"))
+        blocks.extend([nav, dc_buttons(None, kind)])
+        return blocks, f"{title} — nenhuma page"
+
+    un_txt = f"🔴 {n_un} ({sm['unanswered_pct']}%)" if n_un else "✅ 0"
+    resp_txt = (
+        f"mediana {fmt_duration(r['median'])} · p90 {fmt_duration(r['p90'])} (n={r['n']})"
+        if r["n"]
+        else "ninguém respondeu no Slack"
+    )
+    ack_txt = (
+        f"mediana {fmt_duration(a['median'])} · máx {fmt_duration(a['max'])} (n={a['n']})"
+        if a["n"]
+        else "sem ack registrado"
+    )
+    if sm["silent_ack"]:
+        ack_txt += f" · {sm['silent_ack']} sem msg no Slack"
+    status_txt = (
+        " · ".join(f"{STATUS_ICON.get(k, '•')} {v} {k.lower()}" for k, v in st.items()) or "—"
+    )
+    resp_who = ", ".join(f"{x['name']} {x['pages']}" for x in sm["responders"]) or "—"
+    fields = [
+        f"*Pages*\n{total} · {bk.get('auto', 0)} auto · {bk.get('manual', 0)} acionamento(s)",
+        f"*Sem resposta*\n{un_txt}",
+        f"*Resposta humana no Slack*\n{resp_txt}",
+        f"*Ack no Datadog*\n{ack_txt}",
+        f"*Status agora*\n{status_txt}",
+        f"*Responders (Datadog)*\n{resp_who}",
+    ]
+    blocks.append(
+        {"type": "section", "fields": [{"type": "mrkdwn", "text": f[:2000]} for f in fields]}
+    )
+    blocks.append({"type": "divider"})
+
+    pages = sm["pages"]
+    lines = [_page_line(p) for p in pages[:MAX_PAGE_LINES]]
+    if len(pages) > MAX_PAGE_LINES:
+        lines.append(f"_… +{len(pages) - MAX_PAGE_LINES} pages; peça `{short.lower()} 7d`_")
+    blocks.append(_section(f"*Pages de {short} ({total})*"))
+    blocks.extend(_chunk_sections(lines))
+
+    top = sm["top_alerts"]
+    if top:
+        blocks.append({"type": "divider"})
+        blocks.append(
+            _section(
+                "*Mais frequentes:* "
+                + " · ".join(
+                    f"{x['key'].split('|')[0].lower()} {x['key'].split('|')[1][:30]} ×{x['count']}"
+                    f" ({x['d30']} em 30d)"
+                    for x in top
+                )
+            )
+        )
+    blocks.extend([nav, dc_buttons(None, kind)])
     text = f"{title} — {total} pages, {n_un} sem resposta, resposta mediana {fmt_duration(r['median'])}"  # noqa: E501
     return blocks, text
 
@@ -533,6 +684,11 @@ __all__ = [
     "is_allowed",
     "normalize",
     "summary_blocks",
+    "dc_blocks",
+    "dc_buttons",
+    "dc_label",
     "page_card_md",
+    "DC_BUTTONS",
+    "BUTTON_ACTION_RE",
     "PERIOD_KINDS",
 ]

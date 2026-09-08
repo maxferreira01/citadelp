@@ -24,10 +24,18 @@ Tudo no Slack é **somente leitura** exceto: postar na DM e subir o PDF.
 | `recorrentes [período]` | (servidor, evento) e INCs repetidos |
 | `sem resposta [período]` | pages sem resposta/reação/ack |
 | `alerta 52488` · `alerta INC13450` · `alerta 21714051` | card da page (timeline, quem falou, recorrência) |
+| `tesp3` · `tece1 7d` · `tbsp2 mês` | resumo de **um datacenter**: pages, sem resposta, ack, status, responders, eventos mais frequentes |
 | `reenviar pdf` | último PDF gerado |
 | `ajuda` | lista + botões |
 
 Período padrão das consultas: 30 dias. Os botões do relatório disparam os mesmos comandos.
+
+**Botões por datacenter.** A `ajuda` e o relatório diário trazem uma linha com um botão por
+DC (`TESP2 … TESP7 · TECE1 · TBSP1 · TBSP2 · TBSP3 · TBCE1`, lista fixa em `bot.py::DC_BUTTONS`;
+um DC fora da lista que apareça na janela ganha botão também). No relatório o botão mostra a
+contagem da janela (`TESP3 (5)`) e consulta **o mesmo período** do relatório; na ajuda consulta
+30 dias. A resposta do DC tem botões `Hoje · Ontem · 7d · 30d` do próprio DC e a linha de DCs
+de novo, para pular de site em site.
 
 ## Métricas (o que cada número significa)
 

@@ -1,7 +1,18 @@
 from datetime import datetime
 from pathlib import Path
 
-from app.corvo.bot import Command, handle, is_allowed, normalize, route, summary_blocks
+from app.corvo.bot import (
+    BUTTON_ACTION_RE,
+    DC_BUTTONS,
+    Command,
+    dc_buttons,
+    dc_label,
+    handle,
+    is_allowed,
+    normalize,
+    route,
+    summary_blocks,
+)
 from app.corvo.datadog_query import BRT, QueryEngine, anchor_08
 from app.corvo.datadog_store import Store
 
@@ -53,6 +64,39 @@ def test_route_comandos():
     assert route("pdf").name == "reenviar"
     x = route("bom dia, tudo bem?")
     assert x.name == "ajuda" and x.arg == "bom dia tudo bem?"
+
+
+def test_route_datacenter():
+    assert route("tesp3") == Command("dc", arg="TESP03", raw="tesp3")
+    assert route("TESP03 7d") == Command("dc", arg="TESP03", period="7d", raw="TESP03 7d")
+    assert route("tece1 ontem").period == "ontem"
+    c = route("resumo do tbsp2 no mês")
+    assert (c.name, c.arg, c.period) == ("dc", "TBSP02", "mes")
+    assert route("tbce01 mes anterior").period == "mes_anterior"
+    # "dc" sozinho não é datacenter; token colado no hostname também não
+    assert route("top dc").name == "topdc"
+    assert route("alerta leaf1001tesp03").name == "alerta"
+    assert route("tesp3cmk1p00004").name == "ajuda"
+
+
+def test_dc_label_e_botoes():
+    assert dc_label("TESP03") == "TESP3" and dc_label("TECE01") == "TECE1"
+    assert dc_label("TBSP10") == "TBSP10"
+    row = dc_buttons()
+    assert row["type"] == "actions"
+    labels = [e["text"]["text"] for e in row["elements"]]
+    assert labels[:2] == ["TESP2", "TESP3"] and len(labels) == len(DC_BUTTONS)
+    assert all(BUTTON_ACTION_RE.match(e["action_id"]) for e in row["elements"])
+    assert row["elements"][1]["value"] == "tesp3"
+    # com contagem e período: rótulo mostra o nº de pages, valor carrega o período
+    row = dc_buttons({"TESP03": 5, "TPSP01": 1, "?": 2}, "ontem")
+    by_label = {e["text"]["text"]: e["value"] for e in row["elements"]}
+    assert by_label["TESP3 (5)"] == "tesp3 ontem"
+    assert by_label["TESP2"] == "tesp2 ontem"
+    assert by_label["TPSP1 (1)"] == "tpsp1 ontem" and "?" not in " ".join(by_label)
+    c = route(by_label["TESP3 (5)"])
+    assert (c.name, c.arg, c.period) == ("dc", "TESP03", "ontem")
+    assert BUTTON_ACTION_RE.match("corvo_cmd_4") and not BUTTON_ACTION_RE.match("corvo_x_1")
 
 
 def test_is_allowed():
@@ -165,6 +209,58 @@ def test_handle_todos_os_comandos(tmp_path):
 
     r = handle(route("xyz"), ctx, NOW)
     assert "Não entendi" in r.blocks[0]["elements"][0]["text"]
+
+
+def _dc_row(reply):
+    rows = [
+        b
+        for b in reply.blocks
+        if b["type"] == "actions" and b["elements"][0]["action_id"].startswith("corvo_dc_")
+    ]
+    assert len(rows) == 1
+    return rows[0]
+
+
+def test_handle_datacenter(tmp_path):
+    ctx = Ctx(_seed(tmp_path))
+
+    # ajuda tem a linha de botões por DC (período padrão: 30d)
+    r = handle(route("ajuda"), ctx, NOW)
+    assert _dc_row(r)["elements"][1]["value"] == "tesp3"
+
+    # resumo: botões por DC carregam o mesmo período e a contagem da janela
+    r = handle(route("ontem"), ctx, NOW)
+    vals = {e["text"]["text"]: e["value"] for e in _dc_row(r)["elements"]}
+    assert vals["TESP3 (1)"] == "tesp3 ontem" and vals["TESP2"] == "tesp2 ontem"
+
+    # clique no botão → resumo do DC naquele período
+    r = handle(route("tesp3 ontem"), ctx, NOW)
+    t = _text(r)
+    assert "Corvo · TESP3 — 27/08 08:00 → 28/08 08:00" in t
+    assert "*Pages*\n1 · 1 auto" in _fields(r) and "#52488" in t and "#52489" not in t
+    assert "Junovan 1" in _fields(r)
+    assert r.file is None and ctx.pdf_calls == ["ontem"]  # sem PDF novo no comando de DC
+
+    r = handle(route("tesp3"), ctx, NOW)  # padrão 30d
+    assert "últimos 30 dias" in _text(r) and "*Pages*\n2 · 2 auto" in _fields(r)
+    assert "🔴 1 (50%)" in _fields(r)
+    assert "leaf1001tesp03 Interface Ethernet1/21 ×2 (2 em 30d)" in _text(r)
+    nav = [b for b in r.blocks if b["type"] == "actions"][0]
+    assert [e["value"] for e in nav["elements"]] == [
+        "tesp3 hoje",
+        "tesp3 ontem",
+        "tesp3 7d",
+        "tesp3 30d",
+        "top dc 30d",
+    ]
+    assert _dc_row(r)["elements"][1]["value"] == "tesp3 30d"
+
+    r = handle(route("tece1 7d"), ctx, NOW)
+    assert "Pages de TECE1 no período:* nenhuma" in _text(r)
+    assert _dc_row(r)["elements"][6]["value"] == "tece1 7d"
+    assert all(
+        len(b["text"]["text"]) <= 3000 for b in r.blocks if b["type"] == "section" and "text" in b
+    )
 
 
 def test_summary_blocks_limites(tmp_path):

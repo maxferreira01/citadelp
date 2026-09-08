@@ -11,7 +11,7 @@ from datetime import datetime
 from pathlib import Path
 
 from app.corvo import slack_client as sc
-from app.corvo.bot import Reply, handle, is_allowed, route
+from app.corvo.bot import BUTTON_ACTION_RE, Reply, handle, is_allowed, route
 from app.corvo.datadog import attachment_text, is_handover, parse_datadog_page, parse_handover
 from app.corvo.datadog_metrics import PageRef, attribute_channel_message
 from app.corvo.datadog_query import BRT, QueryEngine, now_brt, period
@@ -264,7 +264,7 @@ def build_app(settings: Settings, store: Store | None = None):
         except Exception:  # noqa: BLE001
             logger.exception("erro aplicando reação")
 
-    @app.action({"action_id": __import__("re").compile(r"^corvo_cmd_\d+$")})
+    @app.action({"action_id": BUTTON_ACTION_RE})
     def on_button(ack, body, logger):  # noqa: ANN001
         ack()
         user = (body.get("user") or {}).get("id", "")

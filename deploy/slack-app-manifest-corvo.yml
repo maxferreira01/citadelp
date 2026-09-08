@@ -10,7 +10,7 @@ display_information:
     Bot do CITADEL (Corvo · sinais) que acompanha o canal #datadog-redes: registra
     quem reconheceu e respondeu cada page do Datadog On-Call, tempo de reação,
     datacenters e recorrência, envia um relatório diário (resumo + PDF) por DM e
-    responde comandos como "plantão", "mês", "tempo médio", "top dc", "alerta <id>".
+    responde comandos como "plantão", "mês", "tempo médio", "top dc", "tesp3", "alerta <id>".
 
 features:
   bot_user:

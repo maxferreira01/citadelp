@@ -232,6 +232,59 @@ class QueryEngine:
             "pages": page_rows,
         }
 
+    # ------------------------------------------------------------ por datacenter
+    def dc_summary(self, dc: str, start: float, end: float, label: str = "") -> dict:
+        """Resumo de UM datacenter na janela: mesmas regras do ``summary``, só as
+        pages cujo ``dc`` (normalizado, ex. TESP03) bate. Recorrência em 30d por
+        alert_key — como a chave leva o servidor, ela já é do próprio DC."""
+        rows = [(p, t) for p, t in self.pages_with_times(start, end) if p.dc == dc]
+        pages = [p for p, _ in rows]
+        times = [t for _, t in rows]
+        total = len(rows)
+
+        rec30 = self.store.recurrence(end - 30 * 86400, end)
+        keys = Counter(alert_key(p.servidor, p.evento) for p in pages)
+        keys.pop(None, None)
+        top_alerts = [
+            {"key": k, "count": c, "d30": rec30["alert"].get(k, 0)} for k, c in keys.most_common(5)
+        ]
+        responders = Counter(p.responder for p in pages if p.responder)
+        page_rows = [
+            {
+                **_page_dict(p),
+                **t.as_dict(),
+                "responder_name": self.name(p.responder) if p.responder else None,
+                "response_user_name": self.name(t.response_user) if t.response_user else None,
+            }
+            for p, t in rows
+        ]
+        return {
+            "dc": dc,
+            "window": {
+                "start": start,
+                "end": end,
+                "label": label,
+                "start_iso": _iso(start),
+                "end_iso": _iso(end),
+            },
+            "total": total,
+            "by_kind": dict(Counter(p.kind for p in pages)),
+            "by_status": dict(Counter(p.status or "?" for p in pages).most_common()),
+            "response": stats([t.response_s for t in times]),
+            "ack_all": stats([t.ack_s for t in times if t.ack_s is not None]),
+            "resolve": stats([t.resolve_s for t in times]),
+            "unanswered": [_page_dict(p) for p, t in rows if t.unanswered],
+            "unanswered_pct": round(100 * sum(1 for t in times if t.unanswered) / total)
+            if total
+            else 0,
+            "silent_ack": sum(1 for t in times if t.silent_ack),
+            "top_alerts": top_alerts,
+            "responders": [
+                {"user": u, "name": self.name(u), "pages": n} for u, n in responders.most_common(5)
+            ],
+            "pages": page_rows,
+        }
+
     # ------------------------------------------------------------ consultas
     def count_month(self, now: datetime | None = None) -> dict:
         s, e, label = period("mes", now)
